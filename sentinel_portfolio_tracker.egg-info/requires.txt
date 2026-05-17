@@ -1,0 +1,8 @@
+requests>=2.31.0
+python-dotenv>=1.0.1
+python-bitvavo-api>=1.2.3
+google-genai>=0.1.1
+
+[dev]
+black>=24.0.0
+isort>=5.13.0
