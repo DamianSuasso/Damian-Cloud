@@ -9,27 +9,84 @@ class SentinelAnalyst:
         self.client = genai.Client()
         self.analyzer = PortfolioAnalyzer()
 
+    # 🛠️ Define the tools the model can execute. 
+    # Type hinting and descriptive docstrings are mandatory; Gemini reads them to know how to use the tool!
+    def query_portfolio_database(self, sql_query: str) -> str:
+        """
+        Executes a read-only SQL query on the user's portfolio database tracking 
+        Bitvavo crypto exchanges, DEGIRO broker logs, Trade Republic transactions, and cold storage wallets.
+        Use this tool whenever the user asks for exact amounts, trade counts, specific assets, 
+        or raw transaction history across tables like bitvavo_history, cold_wallet_history, 
+        degiro_history, and trade_republic_history.
+        
+        Args:
+            sql_query: A valid SQLite read-only SELECT statement. Use UPPER() for coin/asset matches.
+        Returns:
+            A string representation of the rows returned by the database.
+        """
+        try:
+            # We leverage the connection inside your existing analyzer framework
+            cursor = self.analyzer.db_manager.conn.cursor()
+            
+            # Guard against dangerous statements
+            upper_query = sql_query.upper().strip()
+            if not upper_query.startswith("SELECT") and not upper_query.startswith("PRAGMA"):
+                return "Error: Only read-only SELECT queries are authorized for this agent interface."
+                
+            cursor.execute(sql_query)
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            
+            if not rows:
+                return "Query executed successfully, but returned 0 rows matching those filters."
+                
+            # Format nicely as a structured block for the LLM to digest
+            result_map = [dict(zip(columns, row)) for row in rows]
+            return str(result_map)
+            
+        except Exception as e:
+            return f"SQL Execution Error: {str(e)}"
+
+    def get_historical_snapshot(self, date_string: str) -> str:
+        """
+        Retrieves a complete portfolio evaluation state on a specific historical date.
+        Use this tool when the user explicitly asks how much their account was worth on a date, 
+        or what their balances looked like in the past.
+        
+        Args:
+            date_string: The target date formatted precisely as 'YYYY-MM-DD'.
+        """
+        try:
+            snapshot = self.analyzer.get_portfolio_snapshot_on_date(date_string)
+            return str(snapshot)
+        except Exception as e:
+            return f"Snapshot Extraction Error: {str(e)}"
+
     def start_chat_loop(self):
         print("\n🤖 Sentinel AI Broker Engine is online. Ask me anything about your holdings or transaction records! (Type 'exit' to quit)")
-        print("💡 Try asking: 'What is my current cost basis?' or 'What was my portfolio worth on 2026-03-01?'\n")
+        print("💡 Try asking: 'Show me my last 3 buys for ETH' or 'How much ADA do I have in my cold storage wallet?'\n")
         
-        # Pre-calculate data structures to supply as system context
+        # Calculate context layers for rapid identification
         cost_basis = self.analyzer.calculate_cost_basis()
         
-        # System instructions are now passed into a configuration object instead of an initial message
         system_instruction = f"""
-        You are 'Sentinel', a private crypto intelligence agent. You have direct database access.
-        Here is the user's computed live cost basis matrix: {cost_basis}.
-        If the user asks about an exact historical date balance, ask them to wait while you interface with the database.
-        Keep answers clear, highly accurate, short, and use a sharp, intelligent, professional tone.
+        You are 'Sentinel', an autonomous private asset intelligence agent. You have direct database read privileges.
+        Here is the user's current basic live cost basis matrix: {cost_basis}.
+        
+        Rules:
+        1. If you need precise data counts, historical timelines, transaction logs, or detailed asset totals, call the `query_portfolio_database` tool.
+        2. Force string targets to uppercase inside queries (e.g., WHERE asset = 'ADA' or WHERE coin = 'ETH') to match layout conventions.
+        3. Keep answers clear, highly accurate, short, and use a sharp, intelligent, professional tone.
         """
         
-        # Open a stateful chat session using the newer, recommended mainline model
+        # Register tools directly in the configuration architecture
         chat = self.client.chats.create(
             model='gemini-2.5-flash',
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.3
+                temperature=0.2,
+                # Binding your functions into the executable workspace pipeline:
+                tools=[self.query_portfolio_database, self.get_historical_snapshot]
             )
         )
         
@@ -39,22 +96,12 @@ class SentinelAnalyst:
                 print("Shutting down Sentinel Agent context. Keep tracking.")
                 break
                 
-            # Intercept date queries dynamically so Python can calculate metrics safely
-            if "worth on" in user_input.lower() or "balance on" in user_input.lower():
-                print("🔍 Sentinel is extracting historical database blocks...")
-                date_match = re.search(r'\d{4}-\d{2}-\d{2}', user_input)
-                if date_match:
-                    target_date = date_match.group(0)
-                    historical_snapshot = self.analyzer.get_portfolio_snapshot_on_date(target_date)
-                    prompt = f"The user asked about their balances on {target_date}. The Python system queried the DB and returned this snapshot structure: {historical_snapshot}. Summarize this cleanly for them."
-                else:
-                    prompt = "The user asked about a past date, but no YYYY-MM-DD format was detected. Politely ask them to rephrase using YYYY-MM-DD format."
-            else:
-                prompt = user_input
+            if not user_input.strip():
+                continue
 
             try:
-                # The modern chat object uses send_message just like before, but routed through the new engine
-                response = chat.send_message(prompt)
+                # The GenAI SDK handles function execution routing automatically inside the chat session context
+                response = chat.send_message(user_input)
                 print(f"\nSentinel 🤖: {response.text}\n")
             except Exception as e:
                 print(f"\nSentinel 🤖: System connection bottleneck: {e}\n")

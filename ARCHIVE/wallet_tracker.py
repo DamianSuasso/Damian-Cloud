@@ -9,7 +9,7 @@ class WalletTracker:
         # 1. Centralized Registry of Public APIs
         # format: 'COIN': (API_URL, JSON_PATH, DIVISOR)
         self.registry = {
-            #'BTC': (f"https://api.blockchair.com/bitcoin/dashboards/address/{os.getenv('WALLET_BTC')}", ['data', os.getenv('WALLET_BTC'), 'address', 'balance'], 100_000_000),
+            'BTC': (f"https://api.blockchair.com/bitcoin/dashboards/address/{os.getenv('WALLET_BTC')}", ['data', os.getenv('WALLET_BTC'), 'address', 'balance'], 100_000_000),
             'ETH': (f"https://api.blockcypher.com/v1/eth/main/addrs/{os.getenv('WALLET_ETH')}/balance", ['balance'], 10**18),
             #'LTC': (f"https://api.blockcypher.com/v1/ltc/main/addrs/{os.getenv('WALLET_LTC')}/balance", ['balance'], 10**8),
             'XRP': (f"https://data.ripple.com/v2/accounts/{os.getenv('WALLET_XRP')}/balances", ['balances'], 1), # XRP needs custom logic for list
