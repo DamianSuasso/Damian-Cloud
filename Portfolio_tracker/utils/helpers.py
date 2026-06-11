@@ -1,4 +1,65 @@
 import sqlite3
+from utils.analyzer import PortfolioAnalyzer
+from utils.price_service import PriceService
+
+def test_portfolio_analyzer():
+    price_engine = PriceService()
+    db_path = price_engine.db_path  # Access the same database path used by the price service
+    
+    # 1. 🔍 Dynamically extract every unique asset across both transaction logs
+    print("📋 Scanning database for active assets...")
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 🔍 Debug: Let's see what tables actually exist in this file right now
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        existing_tables = [row[0] for row in cursor.fetchall()]
+        print(f"🗄️ Tables found inside '{db_path}': {existing_tables}")
+        
+        # Build the asset list dynamically based on what tables are actually ready
+        target_assets = []
+        
+        if 'bitvavo_history' in existing_tables:
+            cursor.execute("SELECT DISTINCT asset FROM bitvavo_history WHERE asset IS NOT NULL AND asset != 'EUR' AND asset != ''")
+            target_assets.extend([row[0] for row in cursor.fetchall()])
+        else:
+            print("⚠️ 'bitvavo_history' table not found in this file.")
+            
+        if 'cold_wallet_history' in existing_tables:
+            cursor.execute("SELECT DISTINCT coin AS asset FROM cold_wallet_history WHERE coin IS NOT NULL AND coin != 'EUR' AND coin != ''")
+            target_assets.extend([row[0] for row in cursor.fetchall()])
+        else:
+            print("ℹ️ 'cold_wallet_history' table does not exist yet (skipping on-chain search).")
+            
+        # De-duplicate the combined list
+        target_assets = list(set(target_assets))
+        conn.close()
+        
+        print(f"🎯 Total unique assets discovered: {', '.join(target_assets) if target_assets else 'None'}")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to scan asset tables automatically: {e}")
+        target_assets = ['BTC', 'ETH', 'ADA']
+
+    # 2. Bulk pre-seed everything discovered
+    print("\n⚡ Warming up local price storage cache via bulk channels...")
+    for asset in target_assets:
+        price_engine.seed_historical_prices_bulk(asset, start_year=2020)
+        
+    # 3. Execute your hyper-optimized, single-pass timeline calculation loop
+    print("\n📈 Compiling financial tracking sheets...")
+    analyzer = PortfolioAnalyzer()
+    history = analyzer.get_portfolio_historical_timeline(interval_days=7)
+
+    # Output the last 3 calculated milestones to confirm success
+    print("\n========================= LATEST PORTFOLIO MILESTONES =========================")
+    for day in history[-3:]:
+        print(f"Date: {day['date']} | Total Net Worth: €{day['total_portfolio_value_eur']:,} | Total Invested: €{day['total_invested_eur']:,} | ROI: {day['roi_percentage']}%")
+        if 'ADA' in day['assets']:
+            ada = day['assets']['ADA']
+            print(f"   -> ADA: Bal: {ada['balance']} | Avg Buy: €{ada['avg_buy_price']} | Profit/Share: €{ada['profit_per_share']}")
+    print("===============================================================================\n")
 
 def inspect_database():
     conn = sqlite3.connect("sentinel_vault.db")
@@ -230,6 +291,7 @@ def print_directory_tree(start_path=".", ignore_dirs=None):
 
 
 if __name__ == "__main__":
+    test_portfolio_analyzer()
     inspect_database()
     audit_full_ada_records()
     audit_ada_records()
