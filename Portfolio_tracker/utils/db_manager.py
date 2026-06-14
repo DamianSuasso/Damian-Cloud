@@ -23,7 +23,7 @@ class DatabaseManager:
         self.create_tables()
 
     def create_tables(self):
-        # Added fiat_currency column to handle USD, USDC, USDT, and EUR variations flawlessly
+        # 1. Bitvavo History Layout
         query_bitvavo = """
         CREATE TABLE IF NOT EXISTS bitvavo_history (
             id TEXT PRIMARY KEY,
@@ -39,7 +39,7 @@ class DatabaseManager:
         """
         self.conn.execute(query_bitvavo)
         
-        # 2. NEW: Dedicated Cold Wallet On-Chain History Layout
+        # 2. Dedicated Cold Wallet On-Chain History Layout
         query_cold_wallet = """
         CREATE TABLE IF NOT EXISTS cold_wallet_history (
             tx_hash TEXT PRIMARY KEY,   -- On-chain unique Transaction Hash/ID
@@ -73,7 +73,7 @@ class DatabaseManager:
         """
         self.conn.execute(query_degiro)
 
-        # 4. Dedicated Trade Republic Table Layout (Supports cash balances, card spend, and stock buys)
+        # 4. Dedicated Trade Republic Table Layout
         query_tr = """
         CREATE TABLE IF NOT EXISTS trade_republic_history (
             transaction_id TEXT PRIMARY KEY,
@@ -95,6 +95,19 @@ class DatabaseManager:
         )
         """
         self.conn.execute(query_tr)
+
+        # 5. ✨ NEW: Centralized Twin-Currency Pricing Engine Cache Matrix
+        query_prices = """
+        CREATE TABLE IF NOT EXISTS historical_prices (
+            asset TEXT,
+            date TEXT,
+            price_eur REAL,
+            price_usdt REAL,
+            PRIMARY KEY (asset, date)
+        )
+        """
+        self.conn.execute(query_prices)
+        
         self.conn.commit()
 
     def save_transactions(self, transactions):
@@ -111,17 +124,17 @@ class DatabaseManager:
                 asset = tx.get('receivedCurrency')
                 amount = tx.get('receivedAmount')
                 fiat_value = tx.get('sentAmount')
-                fiat_currency = tx.get('sentCurrency') # The cash/stablecoin you spent
+                fiat_currency = tx.get('sentCurrency') 
             elif tx_type == 'sell':
                 asset = tx.get('sentCurrency')
                 amount = tx.get('sentAmount')
                 fiat_value = tx.get('receivedAmount')
-                fiat_currency = tx.get('receivedCurrency') # The cash/stablecoin you received
+                fiat_currency = tx.get('receivedCurrency') 
             elif tx_type in ['staking', 'distribution']:
                 asset = tx.get('receivedCurrency')
                 amount = tx.get('receivedAmount')
                 fiat_value = 0.0
-                fiat_currency = 'EUR' # Default baseline for rewards
+                fiat_currency = 'EUR' 
             elif tx_type in ['deposit', 'withdrawal']:
                 asset = tx.get('receivedCurrency') or tx.get('sentCurrency')
                 amount = tx.get('receivedAmount') or tx.get('sentAmount')
@@ -179,7 +192,6 @@ class DatabaseManager:
         """Calculates the current local database balance for a given asset
         by aggregating net transactional historical history.
         """
-        # Fixed table target name to match: cold_wallet_history
         query = """
             SELECT 
                 SUM(CASE WHEN direction = 'INBOUND' THEN amount ELSE 0 END) as inbound_sum,
@@ -189,7 +201,6 @@ class DatabaseManager:
             WHERE coin = ?
         """
         try:
-            # Leverage your class's persistent self.conn instead of spinning up external nodes
             cursor = self.conn.cursor()
             cursor.execute(query, (coin_ticker.upper(),))
             row = cursor.fetchone()
@@ -198,15 +209,10 @@ class DatabaseManager:
             if row and (row[0] is not None or row[1] is not None):
                 inbound = row[0] or 0.0
                 outbound = row[1] or 0.0
-                fee = row[2] or 0.0
                 
-                # Tally your true internal running sum
                 return inbound - outbound
             
             return 0.0
         except Exception as e:
             print(f"⚠️ Local ledger database calculation error for {coin_ticker}: {e}")
             return 0.0
-        
-
-        

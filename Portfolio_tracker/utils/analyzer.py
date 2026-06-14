@@ -129,7 +129,7 @@ class PortfolioAnalyzer:
         
         for asset, qty in balances.items():
             if qty > 0.00001:
-                hist_price = self.price_service.get_historical_eur_price(asset, pseudo_timestamp)
+                hist_price = self.price_service.get_historical_prices(asset, pseudo_timestamp)
                 # Fallback to current spot value if historical candle lookup fails
                 if hist_price == 0.0:
                     hist_price = self.price_service.get_eur_price(asset)
@@ -241,8 +241,8 @@ class PortfolioAnalyzer:
                 if current_qty > 0.0001:
                     t_price_start = time.perf_counter()
                     # Fetch price directly using your persistent caching engine
-                    historical_price = self.price_service.get_historical_eur_price(asset, pseudo_timestamp)
-                    
+                    prices = self.price_service.get_historical_prices(asset, pseudo_timestamp)
+                    historical_price = prices.get('price_eur', 0.0)
                     t_price_delta = time.perf_counter() - t_price_start
 
                     if t_price_delta > 0.05:
@@ -265,7 +265,8 @@ class PortfolioAnalyzer:
                         "avg_buy_price": round(avg_buy_price, 4),
                         "historical_price": round(historical_price, 4),
                         "profit_per_share": round(profit_per_share, 4),
-                        "total_profit_eur": round(total_profit_asset, 2)
+                        "total_profit_eur": round(total_profit_asset, 2),
+                        "historical_price_usdt": round(prices.get('price_usdt', 0.0), 4)
                     }
             stats["math_and_compile_time"] += (time.perf_counter() - t_math_start)   
                 

@@ -1,11 +1,65 @@
+import os
+from dotenv import load_dotenv
 import sqlite3
 from utils.analyzer import PortfolioAnalyzer
 from utils.price_service import PriceService
+from utils.db_manager import DatabaseManager
+import requests
 
-def test_portfolio_analyzer():
-    price_engine = PriceService()
-    db_path = price_engine.db_path  # Access the same database path used by the price service
+price_engine = PriceService()
+db = DatabaseManager()
+SHARED_DB_PATH = price_engine.db_path
+load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
+
+import requests
+
+def check_binance_supported_pairs(target_asset="LMWR"):
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    target_asset = target_asset.upper().strip()
     
+    try:
+        print("🔍 Fetching active market registry from Binance API...")
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"❌ Failed to communicate with Binance. Status Code: {response.status_code}")
+            return
+            
+        data = response.json()
+        symbols_list = data.get("symbols", [])
+        
+        # Track pairs matched to our specific target, and keep a global set of all base assets
+        matched_pairs = []
+        all_base_assets = set()
+        
+        for s in symbols_list:
+            # We only care about active SPOT trading markets
+            if s.get("status") == "TRADING" and s.get("isSpotTradingAllowed", False):
+                base = s.get("baseAsset")
+                quote = s.get("quoteAsset")
+                all_base_assets.add(base)
+                
+                if base == target_asset or quote == target_asset:
+                    matched_pairs.append(f"{base}/{quote}")
+        
+        print("\n--- RESULTS ---")
+        if matched_pairs:
+            print(f"✅ Found {len(matched_pairs)} active native pair(s) for {target_asset}:")
+            for pair in sorted(matched_pairs):
+                print(f"  • {pair}")
+        else:
+            print(f"❌ '{target_asset}' is NOT natively hosted on Binance Spot markets.")
+            # Quick sanity check for close spelling matches
+            similar_assets = [asset for asset in all_base_assets if target_asset in asset or asset in target_asset]
+            if similar_assets:
+                print(f"💡 Did you mean one of these existing assets? {', '.join(sorted(similar_assets))}")
+                
+        print(f"\n📈 Total unique base assets trading on Binance: {len(all_base_assets)}")
+        
+    except Exception as e:
+        print(f"⚠️ Network check failed: {e}")
+
+def test_portfolio_analyzer(db_path = SHARED_DB_PATH):
     # 1. 🔍 Dynamically extract every unique asset across both transaction logs
     print("📋 Scanning database for active assets...")
     try:
@@ -45,7 +99,7 @@ def test_portfolio_analyzer():
     # 2. Bulk pre-seed everything discovered
     print("\n⚡ Warming up local price storage cache via bulk channels...")
     for asset in target_assets:
-        price_engine.seed_historical_prices_bulk(asset, start_year=2020)
+        price_engine.seed_historical_prices_bulk(asset, start_year=2023)
         
     # 3. Execute your hyper-optimized, single-pass timeline calculation loop
     print("\n📈 Compiling financial tracking sheets...")
@@ -59,10 +113,31 @@ def test_portfolio_analyzer():
         if 'ADA' in day['assets']:
             ada = day['assets']['ADA']
             print(f"   -> ADA: Bal: {ada['balance']} | Avg Buy: €{ada['avg_buy_price']} | Profit/Share: €{ada['profit_per_share']}")
+        if 'BTC' in day['assets']:
+            btc = day['assets']['BTC']
+            print(f"   -> BTC: Bal: {btc['balance']} | Avg Buy: €{btc['avg_buy_price']} | Profit/Share: €{btc['profit_per_share']}")
+        if 'ETH' in day['assets']:
+            eth = day['assets']['ETH']
+            print(f"   -> ETH: Bal: {eth['balance']} | Avg Buy: €{eth['avg_buy_price']} | Profit/Share: €{eth['profit_per_share']}")
+        if 'BNB' in day['assets']:
+            bnb = day['assets']['BNB']
+            print(f"   -> BNB: Bal: {bnb['balance']} | Avg Buy: €{bnb['avg_buy_price']} | Profit/Share: €{bnb['profit_per_share']}")
+        if 'USDT' in day['assets']:
+            usdt = day['assets']['USDT']
+            print(f"   -> USDT: Bal: {usdt['balance']} | Avg Buy: €{usdt['avg_buy_price']} | Profit/Share: €{usdt['profit_per_share']}")
+        if 'LINK' in day['assets']:
+            link = day['assets']['LINK']
+            print(f"   -> LINK: Bal: {link['balance']} | Avg Buy: €{link['avg_buy_price']} | Profit/Share: €{link['profit_per_share']}")
+        if 'XRP' in day['assets']:
+            xrp = day['assets']['XRP']
+            print(f"   -> XRP: Bal: {xrp['balance']} | Avg Buy: €{xrp['avg_buy_price']} | Profit/Share: €{xrp['profit_per_share']}")
+        if 'SOL' in day['assets']:
+            sol = day['assets']['SOL']
+            print(f"   -> SOL: Bal: {sol['balance']} | Avg Buy: €{sol['avg_buy_price']} | Profit/Share: €{sol['profit_per_share']}")
     print("===============================================================================\n")
 
-def inspect_database():
-    conn = sqlite3.connect("sentinel_vault.db")
+def inspect_database(db_path = SHARED_DB_PATH):
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     # Check if the table exists first
@@ -110,8 +185,8 @@ def inspect_database():
     print("==============================================================================\n")
     conn.close()
 
-def audit_ada_records():
-    conn = sqlite3.connect("sentinel_vault.db")
+def audit_ada_records(db_path = SHARED_DB_PATH):
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     # Broad check for absolutely anything tracking the ADA asset ticker
@@ -154,8 +229,8 @@ def audit_ada_records():
     print("==============================================================================\n")
     conn.close()
 
-def audit_full_ada_records():
-    conn = sqlite3.connect("sentinel_vault.db")
+def audit_full_ada_records(db_path = SHARED_DB_PATH):
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     # Unified query merging exchange and on-chain cold wallet history
@@ -222,9 +297,9 @@ def audit_full_ada_records():
     print("==============================================================================\n")
     conn.close()
 
-def inspect_cold_wallets():
+def inspect_cold_wallets(db_path = SHARED_DB_PATH):
     """NEW: Reads the blockchain history entries mapped into the system"""
-    conn = sqlite3.connect("sentinel_vault.db")
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='cold_wallet_history';")
@@ -291,6 +366,7 @@ def print_directory_tree(start_path=".", ignore_dirs=None):
 
 
 if __name__ == "__main__":
+    check_binance_supported_pairs("LMWR")
     test_portfolio_analyzer()
     inspect_database()
     audit_full_ada_records()
