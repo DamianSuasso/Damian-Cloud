@@ -2,11 +2,11 @@ import os
 from dotenv import load_dotenv
 import sqlite3
 from utils.analyzer import PortfolioAnalyzer
-from utils.price_service import PriceService
+from Portfolio_tracker.utils.crypto_price_service import Crypto_PriceService
 from utils.db_manager import DatabaseManager
 import requests
 
-price_engine = PriceService()
+price_engine = Crypto_PriceService()
 db = DatabaseManager()
 SHARED_DB_PATH = price_engine.db_path
 load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
@@ -60,50 +60,20 @@ def check_binance_supported_pairs(target_asset="LMWR"):
         print(f"⚠️ Network check failed: {e}")
 
 def test_portfolio_analyzer(db_path = SHARED_DB_PATH):
-    # 1. 🔍 Dynamically extract every unique asset across both transaction logs
-    print("📋 Scanning database for active assets...")
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # 🔍 Debug: Let's see what tables actually exist in this file right now
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        existing_tables = [row[0] for row in cursor.fetchall()]
-        print(f"🗄️ Tables found inside '{db_path}': {existing_tables}")
-        
-        # Build the asset list dynamically based on what tables are actually ready
-        target_assets = []
-        
-        if 'bitvavo_history' in existing_tables:
-            cursor.execute("SELECT DISTINCT asset FROM bitvavo_history WHERE asset IS NOT NULL AND asset != 'EUR' AND asset != ''")
-            target_assets.extend([row[0] for row in cursor.fetchall()])
-        else:
-            print("⚠️ 'bitvavo_history' table not found in this file.")
-            
-        if 'cold_wallet_history' in existing_tables:
-            cursor.execute("SELECT DISTINCT coin AS asset FROM cold_wallet_history WHERE coin IS NOT NULL AND coin != 'EUR' AND coin != ''")
-            target_assets.extend([row[0] for row in cursor.fetchall()])
-        else:
-            print("ℹ️ 'cold_wallet_history' table does not exist yet (skipping on-chain search).")
-            
-        # De-duplicate the combined list
-        target_assets = list(set(target_assets))
-        conn.close()
-        
-        print(f"🎯 Total unique assets discovered: {', '.join(target_assets) if target_assets else 'None'}")
-        
-    except Exception as e:
-        print(f"⚠️ Failed to scan asset tables automatically: {e}")
-        target_assets = ['BTC', 'ETH', 'ADA']
-
-    # 2. Bulk pre-seed everything discovered
-    print("\n⚡ Warming up local price storage cache via bulk channels...")
-    for asset in target_assets:
-        price_engine.seed_historical_prices_bulk(asset, start_year=2023)
-        
-    # 3. Execute your hyper-optimized, single-pass timeline calculation loop
-    print("\n📈 Compiling financial tracking sheets...")
+   # 1. 📈 Initialize the centralized core engine components
+    print("\n[ Initializing Portfolio Analyzer Core Engine... ]")
     analyzer = PortfolioAnalyzer()
+    
+    # 2. ⚡ Warm up local price storage cache using our centralized class method
+    # This automatically handles dynamic asset discovery, table safety checks, and bulk seeding.
+    try:
+        analyzer.warm_up_price_cache(start_year=2023)
+    except Exception as e:
+        print(f"⚠️ Cache warming optimization failed: {e}")
+
+    # 3. 📊 Execute your hyper-optimized, single-pass timeline calculation loop
+    print("\n📈 Compiling financial tracking sheets...")
+    # Using interval_days=7 as your test file originally specified for rapid milestone validation
     history = analyzer.get_portfolio_historical_timeline(interval_days=7)
 
     # Output the last 3 calculated milestones to confirm success
@@ -134,6 +104,12 @@ def test_portfolio_analyzer(db_path = SHARED_DB_PATH):
         if 'SOL' in day['assets']:
             sol = day['assets']['SOL']
             print(f"   -> SOL: Bal: {sol['balance']} | Avg Buy: €{sol['avg_buy_price']} | Profit/Share: €{sol['profit_per_share']}")
+        if 'USDT' in day['assets']:
+            usdt = day['assets']['USDT']
+            print(f"   -> USDT: Bal: {usdt['balance']} | Avg Buy: €{usdt['avg_buy_price']} | Profit/Share: €{usdt['profit_per_share']}")
+        if 'EUR' in day['assets']:
+            eur = day['assets']['EUR']
+            print(f"   -> EUR: Bal: {eur['balance']} | Avg Buy: €{eur['avg_buy_price']} | Profit/Share: €{eur['profit_per_share']}")
     print("===============================================================================\n")
 
 def inspect_database(db_path = SHARED_DB_PATH):
@@ -366,10 +342,10 @@ def print_directory_tree(start_path=".", ignore_dirs=None):
 
 
 if __name__ == "__main__":
-    check_binance_supported_pairs("LMWR")
+    # check_binance_supported_pairs("LMWR")
     test_portfolio_analyzer()
-    inspect_database()
-    audit_full_ada_records()
-    audit_ada_records()
-    inspect_cold_wallets()
-    print_directory_tree()
+    # inspect_database()
+    # audit_full_ada_records()
+    # audit_ada_records()
+    # inspect_cold_wallets()
+    # print_directory_tree()

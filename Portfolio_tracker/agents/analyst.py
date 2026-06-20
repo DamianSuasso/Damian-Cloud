@@ -5,7 +5,8 @@ from google.genai import types
 from utils.analyzer import PortfolioAnalyzer
 
 class SentinelAnalyst:
-    def __init__(self):
+    def __init__(self, historical_data=None):
+        self.historical_data = historical_data or []
         self.client = genai.Client()
         self.analyzer = PortfolioAnalyzer()
 
@@ -46,17 +47,55 @@ class SentinelAnalyst:
 
     def get_historical_snapshot(self, date_string: str) -> str:
         """
-        Retrieves a complete portfolio net worth evaluation snapshot up to a specific historical date.
-        Use this tool when the user explicitly asks what their balances or values looked like in the past.
+        Retrieves a complete, granular asset breakdown portfolio evaluation snapshot on a specific past date.
+        Use this tool when the user asks for exact asset balances, specific token quantities, 
+        or historical average cost bases (Avg Buy) for a single specific day in the past.
         
         Args:
-            date_string: The target date formatted precisely as a string: 'YYYY-MM-DD'.
+            date_string: The target historical date formatted precisely as 'YYYY-MM-DD'.
+        Returns:
+            A string dictionary containing individual asset balances, historical purchase averages, 
+            and profit metrics for that exact day.
         """
         try:
+            # Enforce fetching the complete data structure from your single-pass calculator
             snapshot = self.analyzer.get_portfolio_snapshot_on_date(date_string)
             return str(snapshot)
         except Exception as e:
             return f"Snapshot Extraction Error: {str(e)}"
+    
+    def get_historical_timeline_window(self, start_date: str = None, end_date: str = None) -> str:
+        """
+        Retrieves serialized daily portfolio performance metrics across an active time window.
+        Use this tool whenever the user requests performance tracking over a range of dates, 
+        asks for net profit/ROI progressions, compares asset performances percentually over time,
+        or demands an inspection of equity/cash trends.
+
+        Args:
+            start_date: Optional boundary string formatted as 'YYYY-MM-DD'.
+            end_date: Optional boundary string formatted as 'YYYY-MM-DD'.
+        """
+        if not self.historical_data:
+            return "No pre-compiled historical timeline is available in memory."
+            
+        filtered_timeline = []
+        for point in self.historical_data:
+            point_date = point['date']
+            if start_date and point_date < start_date:
+                continue
+            if end_date and point_date > end_date:
+                continue
+            filtered_timeline.append(point)
+            
+        if not filtered_timeline:
+            return f"No timeline data points found matching the requested window boundaries."
+            
+        # Protect context window length while giving full coverage
+        if len(filtered_timeline) > 31:
+            snippet = filtered_timeline[:5] + [{"...": f"Truncated {len(filtered_timeline)-10} active days..."}] + filtered_timeline[-5:]
+            return str(snippet)
+            
+        return str(filtered_timeline)
 
     def get_database_schema(self) -> str:
         """Dynamically inspects the SQLite database to get actual table names and columns."""
@@ -80,11 +119,24 @@ class SentinelAnalyst:
         
     def start_chat_loop(self):
         print("\n🤖 Sentinel AI Broker Engine is online. Ask me anything about your holdings or transaction records! (Type 'exit' to quit)")
-        print("💡 Try asking: 'Show me my last 3 transactions' or 'What was my net worth on 2026-03-15?'\n")
+        if self.historical_data:
+            latest = self.historical_data[-1]
+            print(f"📊 Current Net Worth: €{latest['total_portfolio_value_eur']:,} | Total Crypto Profit: €{latest['total_unrealized_profit_eur']:,} | Total ROI: {latest['roi_percentage']}%")
+        print("💡 Try asking: 'Show my profit trajectory over the last month' or 'What was my net worth on 2026-03-15?'\n")
         
         # Pull live cost basis calculations to feed into the core setup
         cost_basis = self.analyzer.calculate_cost_basis()
         actual_db_schema = self.get_database_schema()
+
+        macro_summary = "No timeline history loaded."
+        if self.historical_data:
+            first = self.historical_data[0]
+            last = self.historical_data[-1]
+            macro_summary = (
+                f"Historical Range: {first['date']} to {last['date']}. "
+                f"Initial value: €{first['total_portfolio_value_eur']}. "
+                f"Current total net value: €{last['total_portfolio_value_eur']} (Capital Invested: €{last['total_invested_eur']}, Unrealized Profit: €{last['total_unrealized_profit_eur']}, ROI: {last['roi_percentage']}%)."
+            )
         
         system_instruction = f"""
         You are 'Sentinel', an autonomous private asset intelligence agent with read-only database privileges.
@@ -95,11 +147,17 @@ class SentinelAnalyst:
         
         Pre-computed live cost basis matrix for quick reference: {cost_basis}.
         
+        MACRO TIMELINE SUMMARY REFERENCE:
+        {macro_summary}
+        
         Operation Rules:
-        1. When detailed tracking questions, asset distributions, or transaction calculations are requested, call the `query_portfolio_database` function using the exact schema layouts provided above.
+        1. When detailed transaction log audits, specific raw order records, or transaction calculations are requested, call the `query_portfolio_database` function.
         2. Always search using uppercase ticker strings inside queries (e.g., WHERE asset = 'ETH' or WHERE symbol = 'ADA').
-        3. If a query fails or tables are missing, explain the database schema layout directly to the user so they can adjust their query.
-        4. Keep answers clear, highly accurate, and maintain a sharp, professional, intelligent tone.
+        3. YOU DO NOT LACK HISTORICAL DATA. For tracking historical asset holdings, performance percentages over time, token quantities, and shifting cost bases on past dates:
+           - Call `get_historical_snapshot` to get a complete individual asset balance/cost basis breakdown for a single specific day.
+           - Call `get_historical_timeline_window` to analyze macro performance trajectories or find the best-performing asset percentually over a range of dates.
+        4. Note: Double-entry accounting is active. Stablecoins and cash (EUR) have a baseline price of 1.0 and do not bloat invested crypto cost-basis allocations.
+        5. Keep answers clear, highly accurate, and maintain a sharp, professional, intelligent tone.
         """
         
         # Instantiate chat context with functional tools registered directly
@@ -108,7 +166,8 @@ class SentinelAnalyst:
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.2,
-                tools=[self.query_portfolio_database, self.get_historical_snapshot]
+                # ☑️ CHANGED: Registered the new timeline window tool alongside the base functions
+                tools=[self.query_portfolio_database, self.get_historical_snapshot, self.get_historical_timeline_window]
             )
         )
         

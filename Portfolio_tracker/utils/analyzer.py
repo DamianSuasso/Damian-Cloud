@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from utils.db_manager import DatabaseManager
-from utils.price_service import PriceService
+from Portfolio_tracker.utils.crypto_price_service import Crypto_PriceService
 import time
 
 class PortfolioAnalyzer:
     def __init__(self):
         self.db = DatabaseManager()
-        self.price_service = PriceService()
+        self.price_service = Crypto_PriceService()
 
     def calculate_cost_basis(self):
         """Processes full transaction history to calculate average buy prices."""
@@ -26,7 +26,7 @@ class PortfolioAnalyzer:
             tx_type, asset, amount, fiat_value, fiat_currency, fee, fee_currency = row
             
             # Skip native cash/base tracking
-            if asset == 'EUR' or not asset:
+            if asset in ['EUR', 'USDT', 'USDC'] or not asset:
                 continue
 
             if asset not in holdings:
@@ -82,12 +82,17 @@ class PortfolioAnalyzer:
             qty = data['total_qty']
             spent = data['total_spent_eur']
             
-            if qty > 0.00001:  # Filter out dust balances
+            if qty > 0.00001:
                 avg_price = spent / qty if spent > 0 else 0.0
+                
+                if asset == 'BNB' and avg_price == 0.0:
+                    avg_price = 251.59 / 1.08
+                    spent = qty * avg_price
+
                 summary[asset] = {
                     'current_holdings': round(qty, 6),
                     'total_invested_eur': round(spent, 2),
-                    'average_buy_price': round(avg_price, 4) # 4 decimals handles low-priced assets beautifully
+                    'average_buy_price': round(avg_price, 4)
                 }
                 
         return summary
@@ -142,10 +147,7 @@ class PortfolioAnalyzer:
         return report
 
     def get_portfolio_historical_timeline(self, start_date_str=None, interval_days=1):
-        """
-        Ultra-optimized single-pass timeline calculation.
-        Bypasses get_portfolio_snapshot_on_date to eliminate nested loop bottlenecks.
-        """
+        """Ultra-optimized timeline tracking cash balances dynamically."""
         cursor = self.db.conn.cursor()
         
         # 1. Determine timeline boundaries
@@ -158,15 +160,15 @@ class PortfolioAnalyzer:
         else:
             current_date = datetime.strptime(start_date_str, "%Y-%m-%d")
             
-        end_date = datetime.utcnow()
+        end_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         timeline_data = []
 
         # 2. Pull all transactions once
         all_tx_query = """
-            SELECT type AS tx_type, asset, amount, fiat_value, timestamp
+            SELECT type AS tx_type, asset, amount, fiat_value, fiat_currency, fee, fee_currency, timestamp
             FROM bitvavo_history 
             UNION ALL
-            SELECT direction AS tx_type, coin AS asset, amount, 0.0 AS fiat_value, timestamp
+            SELECT direction AS tx_type, coin AS asset, amount, 0.0 AS fiat_value, 'EUR' AS fiat_currency, 0.0 AS fee, 'EUR' AS fee_currency, timestamp
             FROM cold_wallet_history
             ORDER BY timestamp ASC
         """
@@ -179,7 +181,6 @@ class PortfolioAnalyzer:
         # Persistent memory state tracking across time
         running_holdings = {}
         total_days_processed = 0
-        # Persistent performance counters
         stats = {
             "tx_processing_time": 0.0,
             "db_cache_lookup_time": 0.0,
@@ -187,7 +188,7 @@ class PortfolioAnalyzer:
             "math_and_compile_time": 0.0
         }
         
-        print("\n🚀 Starting ultra-optimized historical timeline calculation...")
+        print("\n🚀 Starting historical timeline processing (Fiat & Crypto Unified)...")
 
         # 3. Step through time sequentially
         while current_date <= end_date:
@@ -200,14 +201,14 @@ class PortfolioAnalyzer:
             t0 = time.perf_counter()
             while tx_index < total_tx_count:
                 tx = all_transactions[tx_index]
-                tx_type, asset, amount, fiat_value, timestamp = tx
+                tx_type, asset, amount, fiat_value, fiat_currency, fee, fee_currency, timestamp = tx
                 
                 if datetime.strptime(timestamp[:10], "%Y-%m-%d") > current_date:
                     break
                     
                 tx_index += 1
                 
-                if asset == 'EUR' or not asset: 
+                if not asset: 
                     continue
                     
                 if asset not in running_holdings:
@@ -215,6 +216,7 @@ class PortfolioAnalyzer:
                     
                 qty = float(amount or 0)
                 fiat = float(fiat_value or 0)
+                safe_fee = float(fee or 0)
                 tx_type_clean = tx_type.lower()
                 
                 if tx_type_clean in ['buy', 'staking', 'deposit', 'distribution', 'inbound']:
@@ -227,6 +229,29 @@ class PortfolioAnalyzer:
                         if tx_type_clean == 'sell':
                             running_holdings[asset]['invested'] -= (running_holdings[asset]['invested'] * share)
                         running_holdings[asset]['qty'] -= qty
+                
+                if tx_type_clean == 'buy':
+                    pay_currency = fiat_currency if fiat_currency else 'EUR'
+                    if pay_currency not in running_holdings:
+                        running_holdings[pay_currency] = {'qty': 0.0, 'invested': 0.0}
+                    running_holdings[pay_currency]['qty'] -= fiat
+
+                    f_curr = fee_currency if fee_currency else 'EUR'
+                    if f_curr not in running_holdings:
+                        running_holdings[f_curr] = {'qty': 0.0, 'invested': 0.0}
+                    running_holdings[f_curr]['qty'] -= safe_fee
+
+                elif tx_type_clean == 'sell':
+                    rec_currency = fiat_currency if fiat_currency else 'EUR'
+                    if rec_currency not in running_holdings:
+                        running_holdings[rec_currency] = {'qty': 0.0, 'invested': 0.0}
+                    running_holdings[rec_currency]['qty'] += fiat
+
+                    f_curr = fee_currency if fee_currency else 'EUR'
+                    if f_curr not in running_holdings:
+                        running_holdings[f_curr] = {'qty': 0.0, 'invested': 0.0}
+                    running_holdings[f_curr]['qty'] -= safe_fee
+
             stats["tx_processing_time"] += (time.perf_counter() - t0)
 
             # 4. Calculate Values & Profit per share directly from memory state
@@ -234,30 +259,64 @@ class PortfolioAnalyzer:
             total_value_eur = 0.0
             total_invested_eur = 0.0
             
+            t_math_start = time.perf_counter()
+
+            # Dynamic extraction of the timeline day's FX rate to value USD-pegged stablecoins
+            try:
+                cursor.execute(
+                    "SELECT price_usdt / price_eur FROM historical_prices WHERE asset = 'BTC' AND date = ? AND price_eur > 0", 
+                    (date_str,)
+                )
+                db_rate = cursor.fetchone()
+                current_fx_rate = float(db_rate[0]) if db_rate else 1.08
+            except Exception:
+                current_fx_rate = 1.08
+
             for asset, data in running_holdings.items():
                 current_qty = data['qty']
                 total_spent = data['invested']
                 
+                # --- BNB COST BASIS INTERCEPTION ---
+                if asset == 'BNB' and current_qty > 0.0001 and total_spent == 0.0:
+                    calculated_price_eur = 251.59 / current_fx_rate
+                    total_spent = current_qty * calculated_price_eur
+                
                 if current_qty > 0.0001:
-                    t_price_start = time.perf_counter()
-                    # Fetch price directly using your persistent caching engine
-                    prices = self.price_service.get_historical_prices(asset, pseudo_timestamp)
-                    historical_price = prices.get('price_eur', 0.0)
-                    t_price_delta = time.perf_counter() - t_price_start
-
-                    if t_price_delta > 0.05:
-                        stats["network_api_time"] += t_price_delta
+                    if asset == 'EUR':
+                        historical_price = 1.0
+                        historical_price_usdt = current_fx_rate
+                        avg_buy_price = 1.0
+                        profit_per_share = 0.0
+                        total_profit_asset = 0.0
+                    elif asset in ['USDT', 'USDC']:
+                        historical_price = 1.0 / current_fx_rate
+                        historical_price_usdt = 1.0
+                        avg_buy_price = 1.0
+                        profit_per_share = 0.0
+                        total_profit_asset = 0.0
                     else:
-                        stats["db_cache_lookup_time"] += t_price_delta
+                        # Volatile Cryptocurrencies (Original Core Engine Logic)
+                        t_price_start = time.perf_counter()
+                        prices = self.price_service.get_historical_prices(asset, pseudo_timestamp)
+                        historical_price = prices.get('price_eur', 0.0)
+                        historical_price_usdt = prices.get('price_usdt', 0.0)
+                        t_price_delta = time.perf_counter() - t_price_start
 
-                    t_math_start = time.perf_counter()
+                        if t_price_delta > 0.05:
+                            stats["network_api_time"] += t_price_delta
+                        else:
+                            stats["db_cache_lookup_time"] += t_price_delta
+
+                        avg_buy_price = total_spent / current_qty if total_spent > 0 else 0.0
+                        profit_per_share = historical_price - avg_buy_price
+                        total_profit_asset = (current_qty * historical_price) - total_spent
+
                     asset_market_val = current_qty * historical_price
-                    avg_buy_price = total_spent / current_qty if total_spent > 0 else 0.0
-                    profit_per_share = historical_price - avg_buy_price
-                    total_profit_asset = asset_market_val - total_spent
-                    
                     total_value_eur += asset_market_val
-                    total_invested_eur += total_spent
+                    
+                    # Only add traditional assets to 'invested' to keep ROI calculations meaningful
+                    if asset not in ['EUR', 'USDT', 'USDC']:
+                        total_invested_eur += total_spent
                     
                     assets_metrics[asset] = {
                         "balance": round(current_qty, 4),
@@ -266,7 +325,7 @@ class PortfolioAnalyzer:
                         "historical_price": round(historical_price, 4),
                         "profit_per_share": round(profit_per_share, 4),
                         "total_profit_eur": round(total_profit_asset, 2),
-                        "historical_price_usdt": round(prices.get('price_usdt', 0.0), 4)
+                        "historical_price_usdt": round(historical_price_usdt, 4)
                     }
             stats["math_and_compile_time"] += (time.perf_counter() - t_math_start)   
                 
@@ -295,3 +354,54 @@ class PortfolioAnalyzer:
                 
         print(f"\n✅ Timeline processing complete! Total milestones calculated: {len(timeline_data)}\n")
         return timeline_data
+    
+    def warm_up_price_cache(self, start_year=2023):
+        """
+        Dynamically scans all transaction log tables to find unique assets 
+        and bulk pre-seeds their historical prices to ensure high timeline performance.
+        """
+        print("\n📋 Scanning database for active assets...")
+        target_assets = []
+        
+        try:
+            cursor = self.db.conn.cursor()
+            
+            # Extract existing tables to prevent crashing on uninitialized environments
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            existing_tables = [row[0] for row in cursor.fetchall()]
+            
+            # Scan Bitvavo ledger
+            if 'bitvavo_history' in existing_tables:
+                cursor.execute("""
+                    SELECT DISTINCT asset FROM bitvavo_history 
+                    WHERE asset IS NOT NULL AND asset NOT IN ('EUR', 'USDT', 'USDC', '')
+                """)
+                target_assets.extend([row[0] for row in cursor.fetchall()])
+                
+            # Scan Cold Wallet ledger
+            if 'cold_wallet_history' in existing_tables:
+                cursor.execute("""
+                    SELECT DISTINCT coin AS asset FROM cold_wallet_history 
+                    WHERE coin IS NOT NULL AND coin NOT IN ('EUR', 'USDT', 'USDC', '')
+                """)
+                target_assets.extend([row[0] for row in cursor.fetchall()])
+                
+            # De-duplicate the asset list
+            target_assets = list(set(target_assets))
+            print(f"🎯 Total unique volatile assets discovered: {', '.join(target_assets) if target_assets else 'None'}")
+            
+        except Exception as e:
+            print(f"⚠️ Failed to scan asset tables automatically: {e}")
+            # Safe historical fallback list
+            target_assets = ['BTC', 'ETH', 'ADA', 'BNB', 'SOL', 'LINK', 'XRP']
+
+        # Bulk pre-seed historical pricing blocks
+        if target_assets:
+            print("⚡ Warming up local price storage cache via bulk channels...")
+            for asset in target_assets:
+                try:
+                    # Uses your existing bulk seeding infrastructure to fill local db caches
+                    self.price_service.seed_historical_prices_bulk(asset, start_year=start_year)
+                except Exception as e:
+                    print(f"⚠️ Could not pre-seed bulk data for {asset}: {e}")
+            print("✅ Price cache optimization layer warm and ready.")
