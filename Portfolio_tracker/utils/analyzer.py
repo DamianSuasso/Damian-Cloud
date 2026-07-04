@@ -1,12 +1,102 @@
 from datetime import datetime, timedelta
-from utils.db_manager import DatabaseManager
+from Portfolio_tracker.utils.db_manager import DatabaseManager
 from Portfolio_tracker.utils.crypto_price_service import Crypto_PriceService
+from Portfolio_tracker.utils.stock_price_service import StockPriceService  # 🆕 Import the new stock engine
 import time
 
 class PortfolioAnalyzer:
     def __init__(self):
         self.db = DatabaseManager()
         self.price_service = Crypto_PriceService()
+        self.stock_price_service = StockPriceService()  # 🆕 Instantiate stock service
+
+    # =========================================================================
+    # 1. TRADITIONAL EQUITIES SEGREGATED HELPERS
+    # =========================================================================
+    
+    def _get_active_stock_tickers(self) -> list:
+        """Dynamically scans both broker history tables for active assets."""
+        tickers = []
+        try:
+            cursor = self.db.conn.cursor()
+
+            cursor.execute("SELECT DISTINCT isin FROM degiro_history WHERE isin IS NOT NULL AND isin != ''")
+            tickers.extend([row[0] for row in cursor.fetchall()])
+
+            cursor.execute("SELECT DISTINCT symbol FROM trade_republic_history WHERE symbol IS NOT NULL AND symbol != ''")
+            tickers.extend([row[0] for row in cursor.fetchall()])
+
+            return list(set(tickers))
+        except Exception as e:
+            print(f"⚠️ [Analyzer] Could not scan broker history for active tickers: {e}")
+            return []
+
+    def _get_stock_positions_on_date(self, date_str: str) -> dict:
+        """
+        Dynamically calculates your cumulative stock positions
+        from DEGIRO and Trade Republic ledgers up to a specific date.
+        """
+        positions = {}
+        try:
+            cursor = self.db.conn.cursor()
+
+            cursor.execute("""
+                SELECT isin, aantal, datum FROM degiro_history
+                WHERE datum IS NOT NULL AND datum != ''
+            """)
+            for isin, shares, trade_date in cursor.fetchall():
+                if not isin:
+                    continue
+                if not trade_date:
+                    continue
+
+                try:
+                    tx_date = datetime.strptime(trade_date, "%d-%m-%Y")
+                except ValueError:
+                    continue
+
+                if tx_date > datetime.strptime(date_str, "%Y-%m-%d"):
+                    continue
+
+                if isin not in positions:
+                    positions[isin] = 0.0
+
+                safe_qty = float(shares or 0.0)
+                if safe_qty > 0:
+                    positions[isin] += safe_qty
+                elif safe_qty < 0:
+                    positions[isin] += safe_qty
+
+            cursor.execute("""
+                SELECT symbol, shares, date FROM trade_republic_history
+                WHERE symbol IS NOT NULL AND symbol != '' AND date IS NOT NULL AND date != ''
+            """)
+            for symbol, shares, trade_date in cursor.fetchall():
+                if not symbol:
+                    continue
+
+                try:
+                    tx_date = datetime.strptime(trade_date, "%Y-%m-%d")
+                except ValueError:
+                    continue
+
+                if tx_date > datetime.strptime(date_str, "%Y-%m-%d"):
+                    continue
+
+                if symbol not in positions:
+                    positions[symbol] = 0.0
+
+                safe_qty = float(shares or 0.0)
+                positions[symbol] += safe_qty
+
+        except Exception as e:
+            print(f"[Analyzer] Could not compute stock positions on {date_str}: {e}")
+
+        return positions
+
+    # =========================================================================
+    # 2. CORE PERFORMANCE & METRICS METHODS
+    # =========================================================================
 
     def calculate_cost_basis(self):
         """Processes full transaction history to calculate average buy prices."""
@@ -163,10 +253,10 @@ class PortfolioAnalyzer:
         end_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         timeline_data = []
 
-        # 2. Pull all transactions once
+        # 2. Pull all crypto transactions once, including both exchange and cold wallet flows
         all_tx_query = """
             SELECT type AS tx_type, asset, amount, fiat_value, fiat_currency, fee, fee_currency, timestamp
-            FROM bitvavo_history 
+            FROM bitvavo_history
             UNION ALL
             SELECT direction AS tx_type, coin AS asset, amount, 0.0 AS fiat_value, 'EUR' AS fiat_currency, 0.0 AS fee, 'EUR' AS fee_currency, timestamp
             FROM cold_wallet_history
@@ -188,16 +278,16 @@ class PortfolioAnalyzer:
             "math_and_compile_time": 0.0
         }
         
-        print("\n🚀 Starting historical timeline processing (Fiat & Crypto Unified)...")
+        print("\n🚀 [Analyzer] Starting historical timeline processing (Fiat, Crypto & Stocks Unified)...")
 
         # 3. Step through time sequentially
         while current_date <= end_date:
             date_str = current_date.strftime("%Y-%m-%d")
             pseudo_timestamp = f"{date_str}T23:59:00.000Z"
             
-            print(f"⏳ Processing Date: {date_str} | Days Analyzed: {total_days_processed}...", end="\r", flush=True)
+            print(f"⏳ [Analyzer] Processing Date: {date_str} | Days Analyzed: {total_days_processed}...", end="\r", flush=True)
             
-            # 🔄 Update running balances with transactions that happened up to today
+            # 🔄 Update running crypto balances with transactions that happened up to today
             t0 = time.perf_counter()
             while tx_index < total_tx_count:
                 tx = all_transactions[tx_index]
@@ -207,7 +297,6 @@ class PortfolioAnalyzer:
                     break
                     
                 tx_index += 1
-                
                 if not asset: 
                     continue
                     
@@ -272,6 +361,7 @@ class PortfolioAnalyzer:
             except Exception:
                 current_fx_rate = 1.08
 
+            # --- A. COMPILE CRYPTO METRICS ---
             for asset, data in running_holdings.items():
                 current_qty = data['qty']
                 total_spent = data['invested']
@@ -319,6 +409,7 @@ class PortfolioAnalyzer:
                         total_invested_eur += total_spent
                     
                     assets_metrics[asset] = {
+                        "asset_type": "CRYPTO",
                         "balance": round(current_qty, 4),
                         "value_eur": round(asset_market_val, 2),
                         "avg_buy_price": round(avg_buy_price, 4),
@@ -327,6 +418,44 @@ class PortfolioAnalyzer:
                         "total_profit_eur": round(total_profit_asset, 2),
                         "historical_price_usdt": round(historical_price_usdt, 4)
                     }
+
+            # --- B. COMPILE STOCKS METRICS ---
+            stock_positions = self._get_stock_positions_on_date(date_str)
+            for ticker, stock_qty in stock_positions.items():
+                if stock_qty > 0.001:
+                    resolved_ticker = ticker
+                    if ticker and ticker.upper() in {'EUR', 'USD', 'USDT', 'USDC'}:
+                        continue
+
+                    try:
+                        stk_price_eur = self.stock_price_service.get_price_on_date(resolved_ticker, date_str, preferred_currency="EUR")
+                        stk_price_usd = self.stock_price_service.get_price_on_date(resolved_ticker, date_str, preferred_currency="USDT")
+                    except Exception:
+                        stk_price_eur = 0.0
+                        stk_price_usd = 0.0
+
+                    cursor.execute("SELECT sector FROM asset_ticker_map WHERE resolved_ticker = ? LIMIT 1", (resolved_ticker,))
+                    sector_row = cursor.fetchone()
+                    stock_sector = sector_row[0] if sector_row else "Unknown"
+
+                    stk_market_val = stock_qty * stk_price_eur if stk_price_eur else 0.0
+                    total_value_eur += stk_market_val
+
+                    total_stock_spent = 0.0
+                    total_invested_eur += total_stock_spent
+
+                    assets_metrics[resolved_ticker] = {
+                        "asset_type": "STOCK",
+                        "balance": round(stock_qty, 4),
+                        "value_eur": round(stk_market_val, 2),
+                        "avg_buy_price": 0.0,
+                        "historical_price": round(stk_price_eur, 4),
+                        "profit_per_share": 0.0,
+                        "total_profit_eur": 0.0,
+                        "historical_price_usdt": round(stk_price_usd, 4),
+                        "sector": stock_sector
+                    }
+
             stats["math_and_compile_time"] += (time.perf_counter() - t_math_start)   
                 
             total_unrealized_profit = total_value_eur - total_invested_eur
@@ -352,20 +481,17 @@ class PortfolioAnalyzer:
                 print(f" 🧮 Pure Memory Math:     {stats['math_and_compile_time']:.4f}s")
                 print("-" * 50)
                 
-        print(f"\n✅ Timeline processing complete! Total milestones calculated: {len(timeline_data)}\n")
+        print(f"\n✅ [Analyzer] Timeline processing complete! Total milestones calculated: {len(timeline_data)}\n")
         return timeline_data
     
     def warm_up_price_cache(self, start_year=2023):
-        """
-        Dynamically scans all transaction log tables to find unique assets 
-        and bulk pre-seeds their historical prices to ensure high timeline performance.
-        """
-        print("\n📋 Scanning database for active assets...")
+        """Pre-seeds historical values for all unique assets found in the DB."""
+        print("\n📋 [Analyzer] Scanning database for active assets...")
         target_assets = []
+        start_date = f"{start_year}-01-01"
         
         try:
             cursor = self.db.conn.cursor()
-            
             # Extract existing tables to prevent crashing on uninitialized environments
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             existing_tables = [row[0] for row in cursor.fetchall()]
@@ -388,20 +514,30 @@ class PortfolioAnalyzer:
                 
             # De-duplicate the asset list
             target_assets = list(set(target_assets))
-            print(f"🎯 Total unique volatile assets discovered: {', '.join(target_assets) if target_assets else 'None'}")
+            print(f"🎯 [Analyzer] Total unique volatile crypto assets discovered: {', '.join(target_assets) if target_assets else 'None'}")
             
+            # --- 🆕 traditional stock pre-seed layer ---
+            print("⚡ [Analyzer] Warming up local stock price storage cache via bulk channels...")
+            target_stocks = self._get_active_stock_tickers()
+            for stock_ticker in target_stocks:
+                if stock_ticker and stock_ticker.upper() not in {'EUR', 'USD', 'USDT', 'USDC'}:
+                    # This downloads the full 3+ year history block to SQLite in ONE request
+                    self.stock_price_service.fetch_and_cache_historical_prices(stock_ticker, start_date=start_date)
+        
+            print("✨ [Analyzer] Stock price cache warming sequence fully completed!\n")
+
         except Exception as e:
-            print(f"⚠️ Failed to scan asset tables automatically: {e}")
+            print(f"⚠️ [Analyzer] Failed to scan asset tables automatically: {e}")
             # Safe historical fallback list
             target_assets = ['BTC', 'ETH', 'ADA', 'BNB', 'SOL', 'LINK', 'XRP']
 
         # Bulk pre-seed historical pricing blocks
         if target_assets:
-            print("⚡ Warming up local price storage cache via bulk channels...")
+            print("⚡ [Analyzer] Warming up local crypto price storage cache via bulk channels...")
             for asset in target_assets:
                 try:
                     # Uses your existing bulk seeding infrastructure to fill local db caches
                     self.price_service.seed_historical_prices_bulk(asset, start_year=start_year)
                 except Exception as e:
-                    print(f"⚠️ Could not pre-seed bulk data for {asset}: {e}")
-            print("✅ Price cache optimization layer warm and ready.")
+                    print(f"⚠️ [Analyzer] Could not pre-seed bulk data for {asset}: {e}")
+            print("✅ [Analyzer] Price cache optimization layer warm and ready.")

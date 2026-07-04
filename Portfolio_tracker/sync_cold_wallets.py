@@ -2,7 +2,7 @@ import os
 import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from utils.db_manager import DatabaseManager
+from Portfolio_tracker.utils.db_manager import DatabaseManager
 
 # Force explicitly searching from the current working directory path context
 load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))

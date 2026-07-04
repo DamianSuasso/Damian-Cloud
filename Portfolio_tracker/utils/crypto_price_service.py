@@ -24,7 +24,7 @@ class Crypto_PriceService:
             cursor.execute("""
                 SELECT COUNT(*), MAX(date) 
                 FROM historical_prices 
-                WHERE asset = ? AND price_eur > 0
+                WHERE asset = ? AND asset_type = 'CRYPTO' AND price_eur > 0
             """, (symbol,))
             row = cursor.fetchone()
             conn.close()
@@ -39,7 +39,7 @@ class Crypto_PriceService:
             sixty_days_ago = (datetime.utcnow() - timedelta(days=60)).strftime("%Y-%m-%d")
             
             if cached_count > 100 and max_date_str and max_date_str >= sixty_days_ago:
-                print(f"✅ Cache verified for {symbol} (Up to {max_date_str}). Skipping bulk download.")
+                print(f"✅ [Crypto_PriceService] Cache verified for {symbol} (Up to {max_date_str}). Skipping bulk download.")
                 return False, None
                 
             if max_date_str:
@@ -50,11 +50,11 @@ class Crypto_PriceService:
                 next_start_date = default_start
                 reason = f"No local records found, seeding from {default_start}..."
                 
-            print(f"🔄 Cache synchronization required for {symbol} ({reason})")
+            print(f"🔄 [Crypto_PriceService] Cache synchronization required for {symbol} ({reason})")
             return True, next_start_date
             
         except Exception as e:
-            print(f"⚠️ Pre-flight cache check calculation exception: {e}")
+            print(f"⚠️ [Crypto_PriceService] Pre-flight cache check calculation exception: {e}")
             return True, default_start
 
     def _fetch_coingecko_fallback(self, symbol, date_key=None):
@@ -76,7 +76,7 @@ class Crypto_PriceService:
             if symbol.upper() != "LMWR" or not os.path.exists(csv_path):
                 return None
 
-            print(f"📂 API boundary/limit hit. Activating local CSV look-up engine for {symbol} on {target_date_str}...")
+            print(f"📂 [Crypto_PriceService] API boundary/limit hit. Activating local CSV look-up engine for {symbol} on {target_date_str}...")
             try:
                 target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
                 best_price = None
@@ -98,25 +98,26 @@ class Crypto_PriceService:
 
                 # Allow a max separation margin of 36 hours for daily charts
                 if best_price is not None and smallest_delta < 130000:
-                    print(f"🎯 Local CSV Match Isolated! target: {target_date_str} | row: {matched_date} | price: ${best_price:.4f}")
+                    print(f"🎯 [Crypto_PriceService] Local CSV Match Isolated! target: {target_date_str} | row: {matched_date} | price: ${best_price:.4f}")
                     return best_price
                     
-                print(f"❌ Date {target_date_str} falls outside the boundaries of the local CSV history file.")
+                print(f"❌ [Crypto_PriceService] Date {target_date_str} falls outside the boundaries of the local CSV history file.")
                 return None
             except Exception as csv_err:
-                print(f"⚠️ Failed reading from backup file {csv_path}: {csv_err}")
+                print(f"⚠️ [Crypto_PriceService] Failed reading from backup file {csv_path}: {csv_err}")
                 return None
         
         coingecko_api_key = os.getenv("COINGECKO_API_KEY")
         if not coingecko_api_key:
-            print("❌ Aborted: COINGECKO_API_KEY environment variable missing from .env file.")
+            print("❌ [Crypto_PriceService] Aborted: COINGECKO_API_KEY environment variable missing from .env file.")
             if date_key:
                 csv_price = parse_local_csv_fallback(date_key)
                 if csv_price is not None:
                     return self._package_price_with_cross_rate(csv_price, date_key)
             return None if date_key else False
 
-        gecko_id_map = {"LMWR": "limewire-token"}
+        gecko_id_map = {"LMWR": "limewire-token",
+                        "GRAM": "gram"}
         gecko_id = gecko_id_map.get(symbol, symbol.lower())
         
         # --- DYNAMIC ENDPOINT DISPATCH ---
@@ -125,7 +126,7 @@ class Crypto_PriceService:
             start_dt = target_dt - timedelta(days=2)
             end_dt = target_dt + timedelta(days=3)
             
-            url = f"https://api-demo.coingecko.com/api/v3/coins/{gecko_id}/market_chart/range"
+            url = f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart/range"
             cg_params = {
                 'vs_currency': 'usd',
                 'from': int(start_dt.timestamp()),
@@ -133,7 +134,7 @@ class Crypto_PriceService:
                 'x_cg_demo_api_key': coingecko_api_key
             }
         else:
-            url = f"https://api-demo.coingecko.com/api/v3/coins/{gecko_id}/market_chart"
+            url = f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart"
             cg_params = {
                 'vs_currency': 'usd', 
                 'days': '365', 
@@ -144,7 +145,7 @@ class Crypto_PriceService:
         try:
             res = requests.get(url, params=cg_params, timeout=10)
             if res.status_code != 200:
-                print(f"⚠️ CoinGecko API returned error status: {res.status_code}.")
+                print(f"⚠️ [Crypto_PriceService] CoinGecko API returned error status: {res.status_code}.")
                 if date_key:
                     csv_price = parse_local_csv_fallback(date_key)
                     if csv_price is not None:
@@ -159,7 +160,7 @@ class Crypto_PriceService:
                 best_match = None
                 smallest_delta = float('inf')
 
-                print(f"🕵️ Scanning CoinGecko dataset ({len(prices_array)} entries) for closest match to {date_key}...")
+                print(f"🕵️ [Crypto_PriceService] Scanning CoinGecko dataset ({len(prices_array)} entries) for closest match to {date_key}...")
 
                 for item in prices_array:
                     item_ts = item[0] / 1000  # Convert ms to seconds
@@ -172,7 +173,7 @@ class Crypto_PriceService:
                 if best_match and smallest_delta < 130000:
                     price_usdt = float(best_match[1])
                     found_date = datetime.utcfromtimestamp(best_match[0] / 1000).strftime("%Y-%m-%d")
-                    print(f"🎯 Match isolated via API range! Target: {date_key} | Found: {found_date} | Price: ${price_usdt:.4f}")
+                    print(f"🎯 [Crypto_PriceService] Match isolated via API range! Target: {date_key} | Found: {found_date} | Price: ${price_usdt:.4f}")
                     return self._package_price_with_cross_rate(price_usdt, date_key)
                     # Gather actual cross-rate calculation parameters out of the DB cache
                 
@@ -181,7 +182,7 @@ class Crypto_PriceService:
                 if csv_price is not None:
                     return self._package_price_with_cross_rate(csv_price, date_key)
 
-                print(f"❌ Failed to locate a reliable historical window across API or local CSV for {symbol} on {date_key}.")
+                print(f"❌ [Crypto_PriceService] Failed to locate a reliable historical window across API or local CSV for {symbol} on {date_key}.")
                 return {'price_eur': 0.0, 'price_usdt': 0.0}
 
             # --- FLAVOR 2: BULK SEED CACHE COMMIT RUN ---
@@ -196,18 +197,18 @@ class Crypto_PriceService:
                     price_eur = price_usdt / 1.08  # Default static calculation for generic bulk fills
                     
                     cursor.execute("""
-                        INSERT OR REPLACE INTO historical_prices (asset, date, price_eur, price_usdt)
-                        VALUES (?, ?, ?, ?)
+                        INSERT OR REPLACE INTO historical_prices (asset, asset_type, date, price_eur, price_usdt)
+                        VALUES (?, 'CRYPTO', ?, ?, ?)
                     """, (symbol, candle_date, price_eur, price_usdt))
                     inserted_count += 1
                     
                 conn.commit()
                 conn.close()
-                print(f"✨ Successfully supplemented {inserted_count} historical rows for {symbol} via CoinGecko!")
+                print(f"✨ [Crypto_PriceService] Successfully supplemented {inserted_count} historical rows for {symbol} via CoinGecko!")
                 return True
 
         except Exception as e:
-            print(f"⚠️ Core loop exception: {e}")
+            print(f"⚠️ [Crypto_PriceService] Core loop exception: {e}")
             if date_key:
                 csv_price = parse_local_csv_fallback(date_key)
                 if csv_price is not None:
@@ -293,23 +294,23 @@ class Crypto_PriceService:
                 
         # --- CLEAN ROUTE DELEGATION ---
         if not all_dates:
-            print(f"🔄 Binance missing {symbol}. Route diversion to public CoinGecko engine...")
+            print(f"🔄 [Crypto_PriceService] Binance missing {symbol}. Route diversion to public CoinGecko engine...")
             if not self._fetch_coingecko_fallback(symbol):
-                print(f"❌ No historical data found on Binance or CoinGecko for {symbol}.")
+                print(f"❌ [Crypto_PriceService] No historical data found on Binance or CoinGecko for {symbol}.")
             return
 
         # --- STEP 3: HISTORICAL CROSS-RATE MAP ---
         raw_eur_usdt_history = {}
         if len(eur_candles_map) != len(usdt_candles_map):
             try:
-                print(f"🔀 Data gap detected between markets. Fetching EURUSDT cross-rates for calculations...")
+                print(f"🔀 [Crypto_PriceService] Data gap detected between markets. Fetching EURUSDT cross-rates for calculations...")
                 fx_res = requests.get(self.kline_url, params={**params, 'symbol': 'EURUSDT'}, timeout=10)
                 if fx_res.status_code == 200:
                     for c in fx_res.json():
                         d = datetime.utcfromtimestamp(c[0] / 1000).strftime("%Y-%m-%d")
                         raw_eur_usdt_history[d] = float(c[4])
             except Exception as e:
-                print(f"⚠️ Failed to pull backup forex cross-rates: {e}")
+                print(f"⚠️ [Crypto_PriceService] Failed to pull backup forex cross-rates: {e}")
 
         # --- STEP 4: DATABASE WRITE LOOP ---
         try:
@@ -327,27 +328,27 @@ class Crypto_PriceService:
                     
                     if close_price_eur == 0.0 and close_price_usdt > 0.0:
                         if not gap_logged:
-                            print(f"   ℹ️ [{candle_date}] Missing {symbol}EUR market. Deriving EUR from native USDT data...")
+                            print(f"   ℹ️ [Crypto_PriceService] [{candle_date}] Missing {symbol}EUR market. Deriving EUR from native USDT data...")
                             gap_logged = True
                         close_price_eur = close_price_usdt / eur_usdt_rate if eur_usdt_rate > 0 else close_price_usdt * 0.92
                     
                     elif close_price_usdt == 0.0 and close_price_eur > 0.0:
                         if not gap_logged:
-                            print(f"   ℹ️ [{candle_date}] Missing {symbol}USDT market. Deriving USDT from native EUR data...")
+                            print(f"   ℹ️ [Crypto_PriceService] [{candle_date}] Missing {symbol}USDT market. Deriving USDT from native EUR data...")
                             gap_logged = True
                         close_price_usdt = close_price_eur * eur_usdt_rate
 
                 cursor.execute("""
-                    INSERT OR REPLACE INTO historical_prices (asset, date, price_eur, price_usdt)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO historical_prices (asset, asset_type, date, price_eur, price_usdt)
+                    VALUES (?, 'CRYPTO', ?, ?, ?)
                 """, (symbol, candle_date, close_price_eur, close_price_usdt))
                 inserted_count += 1
                 
             conn.commit()
             conn.close()
-            print(f"✨ Successfully synchronized {inserted_count} clean dual-market rows for {symbol}!")     
+            print(f"✨ [Crypto_PriceService] Successfully synchronized {inserted_count} clean dual-market rows for {symbol}!")     
         except Exception as e:
-            print(f"⚠️ Bulk seeding error writing to cache for {symbol}: {e}")
+            print(f"⚠️ [Crypto_PriceService] Bulk seeding error writing to cache for {symbol}: {e}")
 
     def get_eur_price(self, symbol):
         """Fetches the current price of a symbol in EUR."""
@@ -381,26 +382,26 @@ class Crypto_PriceService:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT price_eur, price_usdt FROM historical_prices WHERE asset = ? AND date = ?", 
-                (symbol, date_key)
-            )
+            cursor.execute("""
+                SELECT price_eur, price_usdt FROM historical_prices 
+                WHERE asset = ? AND asset_type = 'CRYPTO' AND date = ?
+            """, (symbol, date_key))
             row = cursor.fetchone()
             conn.close()
             if row and row[0] is not None and row[1] is not None:
                 return {'price_eur': float(row[0]), 'price_usdt': float(row[1])}
         except Exception as e:
-            print(f"⚠️ Cache read error: {e}")
+            print(f"⚠️ [Crypto_PriceService] Cache read error: {e}")
             
         # 2. 💥 CRITICAL CACHE MISS
-        print(f"💥 CACHE MISS! Hitting Binance API for {symbol} on {date_key}...")
+        print(f"💥 [Crypto_PriceService] CACHE MISS! Hitting Binance API for {symbol} on {date_key}...")
         
         try:
             clean_ts = iso_timestamp.replace('Z', '+00:00')
             parent_dt = datetime.fromisoformat(clean_ts)
             ms_timestamp = int(parent_dt.timestamp() * 1000)
         except Exception as e:
-            print(f"⚠️ Timestamp parsing failed for {iso_timestamp}: {e}")
+            print(f"⚠️ [Crypto_PriceService] Timestamp parsing failed for {iso_timestamp}: {e}")
             return {'price_eur': 0.0, 'price_usdt': 0.0}
 
         fetched_price_eur = 0.0
@@ -439,11 +440,11 @@ class Crypto_PriceService:
 
                 print(f"🌐 Binance API Fetch | {target_pair} | Date: {date_key} | Price EUR: €{fetched_price_eur:.4f} | Price USDT: ${fetched_price_usdt:.4f}")
         except Exception as e:
-            print(f"⚠️ Binance network call failed for {symbol}: {e}")
+            print(f"⚠️ [Crypto_PriceService] Binance network call failed for {symbol}: {e}")
 
         # --- REFACTORED DELEGATION PULL ---
         if fetched_price_eur == 0.0 and fetched_price_usdt == 0.0:
-            print(f"🔄 Binance data unavailable for {symbol} on {date_key}. Route diversion to CoinGecko fallback engine...")
+            print(f"🔄 [Crypto_PriceService] Binance data unavailable for {symbol} on {date_key}. Route diversion to CoinGecko fallback engine...")
             cg_res = self._fetch_coingecko_fallback(symbol, date_key)
             if cg_res:
                 fetched_price_eur = cg_res['price_eur']
@@ -455,12 +456,12 @@ class Crypto_PriceService:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT OR REPLACE INTO historical_prices (asset, date, price_eur, price_usdt)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO historical_prices (asset, asset_type, date, price_eur, price_usdt)
+                    VALUES (?, 'CRYPTO', ?, ?, ?)
                 """, (symbol, date_key, fetched_price_eur, fetched_price_usdt))
                 conn.commit()
                 conn.close() 
             except Exception as e:
-                print(f"⚠️ Failed to write fallback cache to database: {e}")
+                print(f"⚠️ [Crypto_PriceService] Failed to write fallback cache to database: {e}")
                 
         return {'price_eur': fetched_price_eur, 'price_usdt': fetched_price_usdt}

@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
-from connectors.bitvavo import BitvavoConnector
-from utils.db_manager import DatabaseManager
+from Portfolio_tracker.connectors.bitvavo import BitvavoConnector
+from Portfolio_tracker.utils.db_manager import DatabaseManager
 
 def get_latest_stored_timestamp():
     """Queries the database to find the timestamp of the newest recorded transaction."""

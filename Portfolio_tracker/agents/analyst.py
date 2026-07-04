@@ -2,7 +2,7 @@ import os
 import re
 from google import genai
 from google.genai import types
-from utils.analyzer import PortfolioAnalyzer
+from Portfolio_tracker.utils.analyzer import PortfolioAnalyzer
 
 class SentinelAnalyst:
     def __init__(self, historical_data=None):

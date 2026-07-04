@@ -96,17 +96,31 @@ class DatabaseManager:
         """
         self.conn.execute(query_tr)
 
-        # 5. ✨ NEW: Centralized Twin-Currency Pricing Engine Cache Matrix
+        # 5. Centralized Twin-Currency Pricing Engine Cache Matrix
         query_prices = """
         CREATE TABLE IF NOT EXISTS historical_prices (
-            asset TEXT,
-            date TEXT,
+            asset TEXT NOT NULL,
+            asset_type TEXT NOT NULL,  -- 🆕 'STOCK' or 'CRYPTO'
+            date TEXT NOT NULL,
             price_eur REAL,
             price_usdt REAL,
-            PRIMARY KEY (asset, date)
+            PRIMARY KEY (asset, asset_type, date) -- ⚡ FIXED: Compound identity matches asset class
         )
         """
         self.conn.execute(query_prices)
+
+        # 6. 🆕 Persistent Ticker Translation Directory Map Cache
+        query_ticker_map = """
+        CREATE TABLE IF NOT EXISTS asset_ticker_map (
+            identifier TEXT PRIMARY KEY,  -- The input ISIN or raw broker description string
+            resolved_ticker TEXT NOT NULL,  -- The verified canonical Yahoo market ticker symbol
+            sector TEXT DEFAULT 'Unknown'   -- Market sector for stock asset classification
+        )
+        """
+        self.conn.execute(query_ticker_map)
+
+        # Performance optimization index for your dashboard SQL Joins later
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_map_resolved ON asset_ticker_map(resolved_ticker);")
         
         self.conn.commit()
 
@@ -216,3 +230,21 @@ class DatabaseManager:
         except Exception as e:
             print(f"⚠️ Local ledger database calculation error for {coin_ticker}: {e}")
             return 0.0
+    
+    def get_cached_ticker(self, identifier: str) -> str:
+        """Retrieves a locally mapped ticker string to prevent unnecessary web lookups."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT resolved_ticker FROM asset_ticker_map WHERE identifier = ?", (identifier,))
+        row = cursor.fetchone()
+        cursor.close()
+        return row[0] if row else None
+
+    def save_ticker_mapping(self, identifier: str, resolved_ticker: str):
+        """Permanently saves an identifier translation vector to the database vault."""
+        self.conn.execute("""
+            INSERT OR IGNORE INTO asset_ticker_map (identifier, resolved_ticker) 
+            VALUES (?, ?)
+        """, (identifier, resolved_ticker))
+        self.conn.commit()
+
+    
