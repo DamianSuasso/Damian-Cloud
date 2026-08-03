@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-portfolio-tracker"
+version = "0.1.0"
+description = "A private, AI-driven portfolio intelligence system running locally."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Damian" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+# This is where your exact architecture dependencies live
+dependencies = [
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.1",
+    "python-bitvavo-api>=1.2.3",
+    "google-genai>=0.1.1"
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0.0",
+    "isort>=5.13.0"
+]

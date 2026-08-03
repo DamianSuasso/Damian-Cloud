@@ -1,0 +1,4 @@
+python-dotenv
+python-bitvavo-api
+web3
+requests
