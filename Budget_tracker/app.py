@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import calendar
 
 st.set_page_config(
     page_title="Personal Finance Hub",
@@ -38,6 +39,24 @@ CATEGORIES = [
     "Portfolio / Trading (Excluded)",
     "Uncategorized"
 ]
+
+MACRO_MAP = {
+    "Income & Yield": "Income",
+    "Housing & Utilities": "Bills",
+    "Insurances & Banking": "Bills",
+    "Telecom & Internet": "Subscriptions",
+    "Fitness & Subscriptions": "Subscriptions",
+    "Internal Savings / Transfer": "Savings",
+    "Brokerage & Stocks": "Savings",
+    "Crypto Investments": "Savings",
+    "Groceries": "Expenses",
+    "Transport & Fuel": "Expenses",
+    "Dining & Snacks": "Expenses",
+    "Shopping & Clothing": "Expenses",
+    "Leisure & Personal": "Expenses",
+    "Uncategorized": "Expenses",
+    "Portfolio / Trading (Excluded)": "Excluded"
+}
 
 def categorize_bank_row(description, amount):
     desc = str(description).lower()
@@ -198,6 +217,7 @@ if uploaded_bank_files:
                     "EndSaldo": float(row.get('endsaldo', 0.0)),
                     "Amount": amt,
                     "Category": cat,
+                    "MacroCategory": MACRO_MAP.get(cat, "Expenses"),
                     "Description": desc
                 })
         except Exception as e:
@@ -221,6 +241,7 @@ if uploaded_tr_files:
                     "EndSaldo": None,
                     "Amount": amt,
                     "Category": cat,
+                    "MacroCategory": MACRO_MAP.get(cat, "Expenses"),
                     "Description": desc
                 })
         except Exception as e:
@@ -235,12 +256,13 @@ if not df_transactions.empty:
     df_transactions.sort_values(by="Date", ascending=True, inplace=True)
 
 # --- TAB NAVIGATION ---
-tab_upload, tab_tx, tab_accounts, tab_budget, tab_analytics = st.tabs([
+tab_upload, tab_tx, tab_accounts, tab_budget, tab_analytics, tab_monthly = st.tabs([
     "📥 Ingestion Hub", 
     "📝 Transactions", 
     "🏦 Accounts & Savings", 
     "⚖️ Zero-Based Planner", 
-    "📊 Dashboard"
+    "📊 Dashboard",
+    "📅 Monthly Overview"
 ])
 
 # TAB 1: INGESTION HUB
@@ -365,12 +387,9 @@ with tab_analytics:
         available_years = sorted(df_transactions['Year'].dropna().astype(int).unique().tolist())
         selected_dash_year = st.selectbox("Select Year", options=available_years, index=len(available_years)-1, key="dash_year")
         
-        # Filter transactions for selected year
         df_year = df_transactions[df_transactions['Year'] == selected_dash_year].copy()
         
-        # --- 1. WHERE DOES MY MONEY GO? (DONUT + TABLE) ---
         st.markdown("### **WHERE DOES MY MONEY GO?**")
-        
         spend_df = df_year[
             (df_year['Amount'] < 0) & 
             (~df_year['Category'].isin(['Internal Savings / Transfer', 'Portfolio / Trading (Excluded)']))
@@ -407,28 +426,19 @@ with tab_analytics:
             
         st.divider()
         
-        # --- 2. ANNUAL INCOME VS EXPENSES ---
         st.markdown("### **ANNUAL INCOME vs EXPENSES**")
-        
         months_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        
-        # Income monthly aggregation
         monthly_inc = df_year[df_year['Category'] == 'Income & Yield'].groupby('Month_Name')['Amount'].sum()
-        
-        # Expenses monthly aggregation
         monthly_exp = spend_df.groupby('Month_Name')['Expense_Amount'].sum()
-        
         monthly_df = pd.DataFrame({'Income': monthly_inc, 'Expenses': monthly_exp}).reindex(months_order).fillna(0)
         
         fig_inc_exp = go.Figure()
-        
         fig_inc_exp.add_trace(go.Bar(
             x=monthly_df.index,
             y=monthly_df['Expenses'],
             name='TOTAL EXPENSES',
             marker_color='#F7C59F'
         ))
-        
         fig_inc_exp.add_trace(go.Scatter(
             x=monthly_df.index,
             y=monthly_df['Income'],
@@ -438,7 +448,6 @@ with tab_analytics:
             fillcolor='rgba(168, 218, 220, 0.3)',
             line=dict(color='#2A9D8F', shape='spline', width=3)
         ))
-        
         fig_inc_exp.update_layout(
             xaxis_title="Month",
             yaxis_title="Amount (€)",
@@ -450,11 +459,8 @@ with tab_analytics:
         
         st.divider()
         
-        # --- 3. INVESTMENTS & SAVINGS OVER THE YEAR ---
         st.markdown("### **INVESTMENTS & SAVINGS TRACKER**")
         col_inv, col_sav = st.columns(2)
-        
-        # Investments
         inv_df = df_year[df_year['Category'].isin(['Brokerage & Stocks', 'Crypto Investments'])].copy()
         inv_df['Amount'] = inv_df['Amount'].abs()
         
@@ -476,7 +482,6 @@ with tab_analytics:
             else:
                 st.info("No investment records found for this year.")
                 
-        # Savings
         sav_df = df_year[df_year['Category'] == 'Internal Savings / Transfer'].copy()
         sav_df['Amount'] = sav_df['Amount'].abs()
         
@@ -499,3 +504,198 @@ with tab_analytics:
 
     else:
         st.info("No transaction data loaded for dashboard visual display.")
+
+# TAB 6: MONTHLY OVERVIEW
+with tab_monthly:
+    st.subheader("Monthly Granular Overview")
+    if not df_transactions.empty:
+        col_m1, col_m2 = st.columns(2)
+        available_years = sorted(df_transactions['Year'].dropna().astype(int).unique().tolist())
+        
+        with col_m1:
+            sel_m_year = st.selectbox("Select Year", options=available_years, index=len(available_years)-1, key="m_year")
+        with col_m2:
+            month_list = [calendar.month_name[i] for i in range(1, 13)]
+            sel_m_month_str = st.selectbox("Select Month", options=month_list, index=0, key="m_month")
+            sel_m_month = month_list.index(sel_m_month_str) + 1
+
+        # Filter data for selected month/year excluding non-cash portfolio actions
+        df_m = df_transactions[
+            (df_transactions['Year'] == sel_m_year) & 
+            (df_transactions['Month_Num'] == sel_m_month) &
+            (df_transactions['Category'] != 'Portfolio / Trading (Excluded)')
+        ].copy()
+
+        # Compute Monthly Totals
+        m_income = df_m[df_m['Amount'] > 0]['Amount'].sum()
+        m_expenses = abs(df_m[df_m['Amount'] < 0]['Amount'].sum())
+
+        kpi1, kpi2 = st.columns(2)
+        kpi1.metric("Total Income", f"€ {m_income:,.2f}")
+        kpi2.metric("Total Expenses & Savings Outflow", f"€ {m_expenses:,.2f}")
+
+        st.divider()
+
+        # --- FIGURE 1: BALANCE OVERVIEW ---
+        st.markdown("### **BALANCE OVERVIEW**")
+        num_days = calendar.monthrange(sel_m_year, sel_m_month)[1]
+        all_days = pd.date_range(start=f"{sel_m_year}-{sel_m_month:02d}-01", periods=num_days, freq='D')
+        
+        daily_df = pd.DataFrame({'Date': all_days})
+        
+        if not df_m.empty:
+            df_m_daily = df_m.groupby(df_m['Date'].dt.date).agg(
+                Income=('Amount', lambda x: x[x > 0].sum()),
+                Total_Exp=('Amount', lambda x: abs(x[x < 0].sum())),
+                Net=('Amount', 'sum')
+            ).reset_index()
+            df_m_daily['Date'] = pd.to_datetime(df_m_daily['Date'])
+            daily_df = pd.merge(daily_df, df_m_daily, on='Date', how='left').fillna(0)
+        else:
+            daily_df['Income'] = 0.0
+            daily_df['Total_Exp'] = 0.0
+            daily_df['Net'] = 0.0
+
+        daily_df['Balance'] = daily_df['Net'].cumsum()
+        daily_df['Date_Str'] = daily_df['Date'].dt.strftime('%-d-%b')
+
+        fig_bal = go.Figure()
+        fig_bal.add_trace(go.Scatter(
+            x=daily_df['Date_Str'],
+            y=daily_df['Balance'],
+            mode='lines',
+            fill='tozeroy',
+            fillcolor='rgba(224, 242, 254, 0.5)',
+            line=dict(color='#38BDF8', width=2),
+            name="Balance"
+        ))
+        fig_bal.update_layout(
+            template='plotly_white',
+            margin=dict(t=20, b=20, l=20, r=20),
+            yaxis_title="Balance (€)",
+            xaxis_title="Date"
+        )
+        st.plotly_chart(fig_bal, use_container_width=True)
+
+        st.divider()
+
+        # --- FIGURE 2: SPENDING OVERVIEW (MACRO CATEGORIES) ---
+        st.markdown("### **SPENDING OVERVIEW**")
+        m_outflows = df_m[df_m['Amount'] < 0].copy()
+        m_outflows['Abs_Amount'] = m_outflows['Amount'].abs()
+
+        if not m_outflows.empty:
+            macro_summary = m_outflows.groupby('MacroCategory')['Abs_Amount'].sum().reset_index()
+            fig_macro = px.pie(
+                macro_summary,
+                values='Abs_Amount',
+                names='MacroCategory',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_macro.update_traces(textposition='outside', textinfo='label+percent')
+            fig_macro.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig_macro, use_container_width=True)
+        else:
+            st.info("No outflows recorded for this month.")
+
+        st.divider()
+
+        # --- FIGURE 3: WHERE DOES MY MONEY GO? & WHEN DO I SPEND MY MONEY? ---
+        col_fig3_left, col_fig3_right = st.columns(2)
+
+        with col_fig3_left:
+            st.markdown("### **WHERE DOES MY MONEY GO?**")
+            if not m_outflows.empty:
+                cat_summary = m_outflows.groupby('Category')['Abs_Amount'].sum().reset_index()
+                fig_subcat = px.pie(
+                    cat_summary,
+                    values='Abs_Amount',
+                    names='Category',
+                    hole=0.5,
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_subcat.update_traces(textposition='inside', textinfo='percent+label')
+                fig_subcat.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
+                st.plotly_chart(fig_subcat, use_container_width=True)
+            else:
+                st.info("No outflow data for sub-category distribution.")
+
+        with col_fig3_right:
+            st.markdown("### **WHEN DO I SPEND MY MONEY?**")
+            fig_when = px.bar(
+                daily_df,
+                x='Date_Str',
+                y='Total_Exp',
+                color_discrete_sequence=['#D8F3DC']
+            )
+            fig_when.update_traces(marker_line_color='#2D6A4F', marker_line_width=1)
+            fig_when.update_layout(
+                template='plotly_white',
+                xaxis_title="Date",
+                yaxis_title="Daily Expenses (€)",
+                margin=dict(t=20, b=20, l=20, r=20)
+            )
+            st.plotly_chart(fig_when, use_container_width=True)
+
+        st.divider()
+
+        # --- FIGURE 4: ACCOMPANIED TABLES ---
+        col_tbl_left, col_tbl_right = st.columns(2)
+
+        with col_tbl_left:
+            st.markdown("#### **WHERE DOES MY MONEY GO ?**")
+            if not m_outflows.empty:
+                subcat_tbl = m_outflows.groupby('Category')['Abs_Amount'].sum().reset_index()
+                tot_outflow = subcat_tbl['Abs_Amount'].sum()
+                subcat_tbl['PERC.'] = (subcat_tbl['Abs_Amount'] / tot_outflow * 100).round(1).astype(str) + "%"
+                subcat_tbl = subcat_tbl.sort_values(by='Abs_Amount', ascending=False)
+                subcat_tbl.columns = ['SUB-CATEGORY', 'REAL', 'PERC.']
+                subcat_tbl['REAL'] = subcat_tbl['REAL'].apply(lambda x: f"€ {x:,.2f}")
+                st.dataframe(subcat_tbl, hide_index=True, use_container_width=True)
+            else:
+                st.info("No spending records.")
+
+        with col_tbl_right:
+            st.markdown("#### **WHEN DO I SPEND MY MONEY ?**")
+            tbl_when = daily_df[['Date_Str', 'Income', 'Total_Exp', 'Balance']].copy()
+            tbl_when.columns = ['DATE', 'INCOME', 'TOTAL EXP.', 'BALANCE']
+            tbl_when['INCOME'] = tbl_when['INCOME'].apply(lambda x: f"€ {x:,.2f}")
+            tbl_when['TOTAL EXP.'] = tbl_when['TOTAL EXP.'].apply(lambda x: f"€ {x:,.2f}")
+            tbl_when['BALANCE'] = tbl_when['BALANCE'].apply(lambda x: f"€ {x:,.2f}")
+            st.dataframe(tbl_when, hide_index=True, use_container_width=True, height=400)
+
+        st.divider()
+
+        # --- FIGURE 5: FILTERED TRANSACTIONS ---
+        st.markdown("### **FILTERED TRANSACTIONS**")
+        
+        f_col1, f_col2 = st.columns(2)
+        with f_col1:
+            m_cats = st.multiselect("Filter by Sub-Category", options=CATEGORIES, default=[], key="m_subcat_filter")
+        with f_col2:
+            m_macro = st.multiselect("Filter by Category Bucket", options=["Expenses", "Savings", "Bills", "Subscriptions", "Income"], default=[], key="m_macro_filter")
+
+        tx_m_filtered = df_m.copy()
+        if m_cats:
+            tx_m_filtered = tx_m_filtered[tx_m_filtered['Category'].isin(m_cats)]
+        if m_macro:
+            tx_m_filtered = tx_m_filtered[tx_m_filtered['MacroCategory'].isin(m_macro)]
+
+        tot_filtered_amt = abs(tx_m_filtered['Amount'].sum())
+        st.metric("Filtered Total Amount", f"€ {tot_filtered_amt:,.2f}")
+
+        display_tx = tx_m_filtered[['Date', 'Amount', 'Category', 'MacroCategory', 'Account', 'Description']].copy()
+        display_tx.columns = ['DATE', 'AMOUNT', 'SUB-CATEGORY', 'CATEGORY', 'ACCOUNT PROVENANCE', 'DESCRIPTION']
+
+        st.dataframe(
+            display_tx,
+            column_config={
+                "AMOUNT": st.column_config.NumberColumn("AMOUNT", format="€ %.2f"),
+                "DATE": st.column_config.DateColumn("DATE", format="YYYY-MM-DD")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("Upload statement files to view the monthly detailed overview.")
