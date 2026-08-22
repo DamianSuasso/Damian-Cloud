@@ -266,16 +266,18 @@ if not df_transactions.empty:
     df_transactions['Year'] = df_transactions['Date'].dt.year
     df_transactions['Month_Name'] = df_transactions['Date'].dt.strftime('%b')
     df_transactions['Month_Num'] = df_transactions['Date'].dt.month
+    df_transactions['YearMonth'] = df_transactions['Date'].dt.strftime('%Y-%m')
     df_transactions.sort_values(by="Date", ascending=True, inplace=True)
 
 # --- TAB NAVIGATION ---
-tab_upload, tab_tx, tab_accounts, tab_budget, tab_analytics, tab_monthly = st.tabs([
+tab_upload, tab_tx, tab_accounts, tab_budget, tab_analytics, tab_monthly, tab_ai = st.tabs([
     "📥 Ingestion Hub", 
     "📝 Transactions", 
     "🏦 Accounts & Savings", 
     "⚖️ Zero-Based Planner", 
     "📊 Dashboard",
-    "📅 Monthly Overview"
+    "📅 Monthly Overview",
+    "🤖 Smart Budget Assistant"
 ])
 
 # TAB 1: INGESTION HUB
@@ -801,3 +803,151 @@ with tab_monthly:
         )
     else:
         st.info("Upload statement files to view the monthly detailed overview.")
+
+# TAB 7: SMART BUDGET ASSISTANT
+with tab_ai:
+    st.subheader("🤖 AI Budgeting Suggestions & Historical Benchmark")
+    
+    if not df_transactions.empty:
+        st.write("This tab analyzes your past spending trends to calculate realistic monthly budget targets for flexible categories.")
+        
+        # Filter for actual spending (outflows, excluding internal transfers)
+        spend_data = df_transactions[
+            (df_transactions['Amount'] < 0) & 
+            (~df_transactions['Category'].isin(['Internal Savings / Transfer', 'Internal Transfer (Excluded)', 'Portfolio / Trading (Excluded)']))
+        ].copy()
+        spend_data['Abs_Amount'] = spend_data['Amount'].abs()
+        
+        # Monthly spending per category
+        monthly_cat_spend = spend_data.groupby(['YearMonth', 'Category'])['Abs_Amount'].sum().reset_index()
+        
+        # Select target categories for suggestions
+        default_target_cats = ["Groceries", "Transport & Fuel", "Dining & Snacks", "Shopping & Clothing", "Leisure & Personal"]
+        selected_target_cats = st.multiselect(
+            "Select categories to generate budget targets for:",
+            options=[c for c in CATEGORIES if c not in ['Income & Yield', 'Internal Savings / Transfer', 'Internal Transfer (Excluded)', 'Portfolio / Trading (Excluded)']],
+            default=[c for c in default_target_cats if c in CATEGORIES]
+        )
+        
+        if selected_target_cats:
+            # Group by total months loaded in data to properly average even if a month had €0
+            total_months_count = df_transactions['YearMonth'].nunique()
+            
+            stats_list = []
+            for cat in selected_target_cats:
+                cat_df = monthly_cat_spend[monthly_cat_spend['Category'] == cat]
+                total_spent = cat_df['Abs_Amount'].sum()
+                avg_spent = total_spent / total_months_count if total_months_count > 0 else 0.0
+                max_spent = cat_df['Abs_Amount'].max() if not cat_df.empty else 0.0
+                min_spent = cat_df['Abs_Amount'].min() if not cat_df.empty else 0.0
+                std_spent = cat_df['Abs_Amount'].std() if len(cat_df) > 1 else 0.0
+                
+                # Rule-based AI Recommendation logic
+                # Low volatility -> Rec = Avg + 5%
+                # High volatility -> Rec = Median/Avg padded for buffer
+                recommended_budget = round(avg_spent * 1.05, -1) # Rounded to nearest 10
+                if recommended_budget == 0:
+                    recommended_budget = 50.0
+                
+                stats_list.append({
+                    "Category": cat,
+                    "Historical Monthly Avg": avg_spent,
+                    "Min Month": min_spent,
+                    "Max Month": max_spent,
+                    "Volatility (StdDev)": std_spent,
+                    "Suggested Monthly Budget": recommended_budget
+                })
+            
+            stats_df = pd.DataFrame(stats_list)
+            
+            # --- DISPLAY SUMMARY BENCHMARKS ---
+            st.markdown("### **1. Category Spending Benchmarks**")
+            st.dataframe(
+                stats_df,
+                column_config={
+                    "Historical Monthly Avg": st.column_config.NumberColumn("Avg / Month", format="€ %.2f"),
+                    "Min Month": st.column_config.NumberColumn("Min Month", format="€ %.2f"),
+                    "Max Month": st.column_config.NumberColumn("Max Month", format="€ %.2f"),
+                    "Volatility (StdDev)": st.column_config.NumberColumn("Std Dev", format="€ %.2f"),
+                    "Suggested Monthly Budget": st.column_config.NumberColumn("Recommended Target", format="€ %.2f")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            st.divider()
+            
+            # --- AI ADVISOR INSIGHTS ---
+            st.markdown("### **2. AI Advisor Recommendations & Insights**")
+            
+            for item in stats_list:
+                cat_name = item["Category"]
+                avg_val = item["Historical Monthly Avg"]
+                max_val = item["Max Month"]
+                rec_val = item["Suggested Monthly Budget"]
+                vol_val = item["Volatility (StdDev)"]
+                
+                with st.expander(f"📌 **{cat_name}** — Suggested Budget: **€ {rec_val:,.2f}** / month", expanded=True):
+                    col_a, col_b = st.columns([1, 2])
+                    
+                    with col_a:
+                        st.metric("Recommended Budget", f"€ {rec_val:,.2f}")
+                        st.metric("Historical Avg Spending", f"€ {avg_val:,.2f}")
+                        
+                    with col_b:
+                        if cat_name == "Groceries":
+                            st.info(
+                                f"**Analysis:** Your baseline spending for groceries averages **€{avg_val:,.2f}** per month. "
+                                f"Groceries are essential and predictable. Setting a target of **€{rec_val:,.2f}** allows a 5% safety buffer for inflation or bulk buys without overspending."
+                            )
+                        elif cat_name == "Transport & Fuel":
+                            st.info(
+                                f"**Analysis:** Fuel and transport costs average **€{avg_val:,.2f}** with a peak month of **€{max_val:,.2f}**. "
+                                f"Because fuel fluctuates with mileage and prices, a recommended cap of **€{rec_val:,.2f}** covers standard weekly driving."
+                            )
+                        elif cat_name == "Dining & Snacks":
+                            st.warning(
+                                f"**Analysis:** Dining out averages **€{avg_val:,.2f}** monthly. "
+                                f"This is discretionary spending. A strict target of **€{rec_val:,.2f}** keeps dining enjoyable while preserving cash for savings."
+                            )
+                        else:
+                            st.success(
+                                f"**Analysis:** Based on past data averaging **€{avg_val:,.2f}**, a monthly target of **€{rec_val:,.2f}** provides a well-balanced allocation based on your real spending behavior."
+                            )
+
+            st.divider()
+            
+            # --- HISTORICAL MONTHLY TREND CHART ---
+            st.markdown("### **3. Historical Category Trends vs Suggested Targets**")
+            sel_chart_cat = st.selectbox("Select category to view monthly breakdown:", options=selected_target_cats)
+            
+            trend_df = monthly_cat_spend[monthly_cat_spend['Category'] == sel_chart_cat].sort_values(by='YearMonth')
+            target_val = next((item['Suggested Monthly Budget'] for item in stats_list if item['Category'] == sel_chart_cat), 0)
+            
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Bar(
+                x=trend_df['YearMonth'],
+                y=trend_df['Abs_Amount'],
+                name='Actual Spent',
+                marker_color='#4EA8DE'
+            ))
+            fig_trend.add_trace(go.Scatter(
+                x=trend_df['YearMonth'],
+                y=[target_val] * len(trend_df),
+                name='Suggested Budget Target',
+                mode='lines',
+                line=dict(color='#E76F51', width=3, dash='dash')
+            ))
+            fig_trend.update_layout(
+                template='plotly_white',
+                xaxis_title="Month",
+                yaxis_title="Amount (€)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
+            
+        else:
+            st.info("Select at least one category above to display AI recommendations.")
+            
+    else:
+        st.info("Upload transaction files to enable AI budgeting suggestions and historical benchmarks.")
