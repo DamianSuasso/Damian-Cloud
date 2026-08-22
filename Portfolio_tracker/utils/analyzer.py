@@ -1,15 +1,28 @@
 from datetime import datetime, timedelta
 from Portfolio_tracker.utils.db_manager import DatabaseManager
-from Portfolio_tracker.utils.crypto_price_service import Crypto_PriceService
+from Portfolio_tracker.utils.crypto_price_service import CryptoPriceService
 from Portfolio_tracker.utils.stock_price_service import StockPriceService  # 🆕 Import the new stock engine
 import time
+from typing import Dict, Any, Union, Optional, List
+
 
 class PortfolioAnalyzer:
-    def __init__(self):
-        self.db = DatabaseManager()
-        self.price_service = Crypto_PriceService()
-        self.stock_price_service = StockPriceService()  # 🆕 Instantiate stock service
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
+        self.db = db_manager if db_manager else DatabaseManager()
+        self._price_service = None
+        self._stock_price_service = None
 
+    @property
+    def price_service(self):
+        if self._price_service is None:
+            self._price_service = CryptoPriceService()
+        return self._price_service
+
+    @property
+    def stock_price_service(self):
+        if self._stock_price_service is None:
+            self._stock_price_service = StockPriceService()
+        return self._stock_price_service
     # =========================================================================
     # 1. TRADITIONAL EQUITIES SEGREGATED HELPERS
     # =========================================================================
@@ -90,7 +103,7 @@ class PortfolioAnalyzer:
                 positions[symbol] += safe_qty
 
         except Exception as e:
-            print(f"[Analyzer] Could not compute stock positions on {date_str}: {e}")
+            print(f"⚠️ [Analyzer] Could not compute stock positions on {date_str}: {e}")
 
         return positions
 
@@ -348,6 +361,12 @@ class PortfolioAnalyzer:
             total_value_eur = 0.0
             total_invested_eur = 0.0
             
+            # --- Tracker buckets for Stocks vs Crypto Toggling ---
+            crypto_value_eur = 0.0
+            crypto_invested_eur = 0.0
+            stock_value_eur = 0.0
+            stock_invested_eur = 0.0
+            
             t_math_start = time.perf_counter()
 
             # Dynamic extraction of the timeline day's FX rate to value USD-pegged stablecoins
@@ -403,15 +422,18 @@ class PortfolioAnalyzer:
 
                     asset_market_val = current_qty * historical_price
                     total_value_eur += asset_market_val
+                    crypto_value_eur += asset_market_val
                     
                     # Only add traditional assets to 'invested' to keep ROI calculations meaningful
                     if asset not in ['EUR', 'USDT', 'USDC']:
                         total_invested_eur += total_spent
+                        crypto_invested_eur += total_spent
                     
                     assets_metrics[asset] = {
                         "asset_type": "CRYPTO",
                         "balance": round(current_qty, 4),
                         "value_eur": round(asset_market_val, 2),
+                        "invested_eur": round(total_spent if asset not in ['EUR', 'USDT', 'USDC'] else 0.0, 2),
                         "avg_buy_price": round(avg_buy_price, 4),
                         "historical_price": round(historical_price, 4),
                         "profit_per_share": round(profit_per_share, 4),
@@ -440,18 +462,24 @@ class PortfolioAnalyzer:
 
                     stk_market_val = stock_qty * stk_price_eur if stk_price_eur else 0.0
                     total_value_eur += stk_market_val
+                    stock_value_eur += stk_market_val
 
-                    total_stock_spent = 0.0
+                    # Calculate or retrieve cost basis/spent for stock if available in your helper
+                    total_stock_spent = getattr(self, '_get_stock_cost_basis', lambda t, d: 0.0)(resolved_ticker, date_str)
                     total_invested_eur += total_stock_spent
+                    stock_invested_eur += total_stock_spent
+
+                    stock_profit = stk_market_val - total_stock_spent
 
                     assets_metrics[resolved_ticker] = {
                         "asset_type": "STOCK",
                         "balance": round(stock_qty, 4),
                         "value_eur": round(stk_market_val, 2),
-                        "avg_buy_price": 0.0,
+                        "invested_eur": round(total_stock_spent, 2),
+                        "avg_buy_price": round(total_stock_spent / stock_qty, 4) if stock_qty > 0 and total_stock_spent > 0 else 0.0,
                         "historical_price": round(stk_price_eur, 4),
-                        "profit_per_share": 0.0,
-                        "total_profit_eur": 0.0,
+                        "profit_per_share": round((stk_price_eur - (total_stock_spent / stock_qty)), 4) if stock_qty > 0 and total_stock_spent > 0 else 0.0,
+                        "total_profit_eur": round(stock_profit, 2),
                         "historical_price_usdt": round(stk_price_usd, 4),
                         "sector": stock_sector
                     }
@@ -467,6 +495,19 @@ class PortfolioAnalyzer:
                 "total_invested_eur": round(total_invested_eur, 2),
                 "total_unrealized_profit_eur": round(total_unrealized_profit, 2),
                 "roi_percentage": round(roi_percentage, 2),
+                
+                # --- Asset Class Aggregates for Toggling (Both / Stocks / Crypto) ---
+                "stocks": {
+                    "value_eur": round(stock_value_eur, 2),
+                    "invested_eur": round(stock_invested_eur, 2),
+                    "unrealized_profit_eur": round(stock_value_eur - stock_invested_eur, 2)
+                },
+                "crypto": {
+                    "value_eur": round(crypto_value_eur, 2),
+                    "invested_eur": round(crypto_invested_eur, 2),
+                    "unrealized_profit_eur": round(crypto_value_eur - crypto_invested_eur, 2)
+                },
+                
                 "assets": assets_metrics
             })
             
@@ -483,7 +524,7 @@ class PortfolioAnalyzer:
                 
         print(f"\n✅ [Analyzer] Timeline processing complete! Total milestones calculated: {len(timeline_data)}\n")
         return timeline_data
-    
+
     def warm_up_price_cache(self, start_year=2023):
         """Pre-seeds historical values for all unique assets found in the DB."""
         print("\n📋 [Analyzer] Scanning database for active assets...")

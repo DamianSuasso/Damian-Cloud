@@ -21,12 +21,12 @@ def get_latest_stored_timestamp():
             # Bitvavo API expects fromDate as a Unix timestamp string in MILLISECONDS
             return str(int(dt.timestamp() * 1000))
         except Exception as e:
-            print(f"⚠️ Error parsing last timestamp formatting: {e}")
+            print(f"⚠️ [SyncCrypto] Error parsing last timestamp formatting: {e}")
             return "0"
     return "0" # If DB is empty, default to beginning of time
 
 def sync_bitvavo():
-    print("🔄 Connecting to Bitvavo to fetch historical data...")
+    print("🔄 [SyncCrypto] Connecting to Bitvavo to fetch historical data...")
     bv = BitvavoConnector()
     db = DatabaseManager()
     
@@ -34,22 +34,22 @@ def sync_bitvavo():
     from_date_ms = get_latest_stored_timestamp()
     
     if from_date_ms != "0":
-        print(f"⏱️ Requesting new ledger entries since last sync milestone...")
+        print(f"⏱️ [SyncCrypto] Requesting new ledger entries since last sync milestone...")
     else:
-        print("📥 Local database is empty. Extracting entire account lifecycle...")
+        print("📥 [SyncCrypto] Local database is empty. Extracting entire account lifecycle...")
 
     # 2. Grab only the new delta history from the connector
     history = bv.get_transaction_history(from_date=from_date_ms)
     
     # 3. Save to database if new records are found
     if history:
-        print(f"✅ Found {len(history)} new historical events.")
+        print(f"✅ [SyncCrypto] Found {len(history)} new historical events.")
         db.save_transactions(history)
-        print("💾 New history saved to database.")
+        print("💾 [SyncCrypto] New history saved to database.")
     elif history == []:
-        print("✅ Database is already fully sync-locked. No new entries found.")
+        print("✅ [SyncCrypto] Database is already fully sync-locked. No new entries found.")
     else:
-        print("❌ Could not fetch history. Check API permissions or mock configurations.")
+        print("❌ [SyncCrypto] Could not fetch history. Check API permissions or mock configurations.")
 
 if __name__ == "__main__":
     sync_bitvavo()

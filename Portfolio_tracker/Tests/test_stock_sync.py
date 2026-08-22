@@ -15,7 +15,7 @@ if project_root not in sys.path:
 
 try:
     from Portfolio_tracker.utils.db_manager import DatabaseManager
-    from Portfolio_tracker.sync_stocks import sync_stocks, resolve_ticker_via_api
+    from Portfolio_tracker.sync_stocks import sync_stocks, resolve_ticker_and_sector
     from Portfolio_tracker.utils.stock_price_service import StockPriceService  # 🆕 Imported the new service
 except ImportError as e:
     print(f"❌ Structural Import Error: Verify your directory tree. Details: {e}")
@@ -36,7 +36,7 @@ def run_isolated_test():
 
     api_failures = 0
     for sample, expected in test_cases.items():
-        resolved = resolve_ticker_via_api(sample)
+        resolved = resolve_ticker_and_sector(sample)
         if resolved and resolved != sample:
             print(f"  ✅ API Verified: Treated '{sample}' ➡️ Resolved as Ticker: '{resolved}'")
         elif resolved == sample:

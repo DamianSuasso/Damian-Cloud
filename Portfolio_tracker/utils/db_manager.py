@@ -100,14 +100,20 @@ class DatabaseManager:
         query_prices = """
         CREATE TABLE IF NOT EXISTS historical_prices (
             asset TEXT NOT NULL,
-            asset_type TEXT NOT NULL,  -- 🆕 'STOCK' or 'CRYPTO'
+            asset_type TEXT NOT NULL,  -- 'STOCK' or 'CRYPTO'
             date TEXT NOT NULL,
             price_eur REAL,
             price_usdt REAL,
-            PRIMARY KEY (asset, asset_type, date) -- ⚡ FIXED: Compound identity matches asset class
-        )
+            PRIMARY KEY (asset, asset_type, date)
+        );
         """
         self.conn.execute(query_prices)
+
+        # Explicit index to enforce upsert compatibility:
+        self.conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_historical_prices_asset_type_date 
+            ON historical_prices (asset, asset_type, date);
+        """)
 
         # 6. 🆕 Persistent Ticker Translation Directory Map Cache
         query_ticker_map = """
@@ -228,7 +234,7 @@ class DatabaseManager:
             
             return 0.0
         except Exception as e:
-            print(f"⚠️ Local ledger database calculation error for {coin_ticker}: {e}")
+            print(f"⚠️ [DBManager] Local ledger database calculation error for {coin_ticker}: {e}")
             return 0.0
     
     def get_cached_ticker(self, identifier: str) -> str:
@@ -246,5 +252,34 @@ class DatabaseManager:
             VALUES (?, ?)
         """, (identifier, resolved_ticker))
         self.conn.commit()
+
+    def get_stock_sector_map(self) -> dict:
+        """Reads asset_ticker_map from SQLite database and returns a dictionary mapping
+        both the raw identifier (ISIN/Name) and the canonical resolved ticker to its sector.
+        """
+        sector_map = {}
+        try:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("SELECT identifier, resolved_ticker, sector FROM asset_ticker_map")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            for identifier, resolved_ticker, sector in rows:
+                sec = sector if (sector and sector.strip() and sector != 'Unknown') else 'Equity'
+                
+                # Map raw identifier (ISIN or exchange string)
+                if identifier:
+                    sector_map[str(identifier).strip().upper()] = sec
+                
+                # Map resolved ticker (Yahoo ticker)
+                if resolved_ticker:
+                    sector_map[str(resolved_ticker).strip().upper()] = sec
+
+        except Exception as e:
+            print(f"⚠️ [DBManager] Error fetching stock sectors from asset_ticker_map: {e}")
+
+        return sector_map
 
     

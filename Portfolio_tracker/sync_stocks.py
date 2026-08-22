@@ -45,7 +45,7 @@ def resolve_ticker_and_sector(identifier: str) -> tuple[str, str]:
             RESOLVED_SECTORS_CACHE[identifier] = sector
             return ticker, sector
     except Exception as e:
-        print(f"⚠️ Local ticker map lookup error: {e}")
+        print(f"⚠️ [SyncStocks] Local ticker map lookup error: {e}")
 
     # Native Short Symbol short-circuit baseline
     resolved_ticker = identifier
@@ -53,7 +53,7 @@ def resolve_ticker_and_sector(identifier: str) -> tuple[str, str]:
         resolved_ticker = identifier
 
     # 3. API Query Layer (Fetches both Ticker and Sector in ONE hit)
-    print(f"🔍 [API Lookup] Cache miss. Fetching complete metadata directory for: '{identifier}'...")
+    print(f"🔍 [SyncStocks] [API Lookup] Cache miss. Fetching complete metadata directory for: '{identifier}'...")
     sector = "Other"
     try:
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={identifier}&quotesCount=1&newsCount=0"
@@ -66,7 +66,7 @@ def resolve_ticker_and_sector(identifier: str) -> tuple[str, str]:
             if quotes:
                 resolved_ticker = quotes[0].get("symbol", resolved_ticker).upper()
                 sector = quotes[0].get("sector", "Other") or "Other"
-                print(f"🎯 [API Match] Resolved '{identifier}' ➡️ Ticker: '{resolved_ticker}' | Sector: '{sector}'")
+                print(f"🎯 [SyncStocks] [API Match] Resolved '{identifier}' ➡️ Ticker: '{resolved_ticker}' | Sector: '{sector}'")
                 
                 # Commit to DB
                 cursor = _db_map_client.conn.cursor()
@@ -77,7 +77,7 @@ def resolve_ticker_and_sector(identifier: str) -> tuple[str, str]:
                 _db_map_client.conn.commit()
                 cursor.close()
     except Exception as e:
-        print(f"⚠️ [API Lookup Failed] Metadata trace blocked for '{identifier}': {e}")
+        print(f"⚠️ [SyncStocks] [API Lookup Failed] Metadata trace blocked for '{identifier}': {e}")
 
     RESOLVED_TICKERS_CACHE[identifier] = resolved_ticker
     RESOLVED_SECTORS_CACHE[identifier] = sector
@@ -86,7 +86,7 @@ def resolve_ticker_and_sector(identifier: str) -> tuple[str, str]:
 def parse_degiro(db_manager, csv_path):
     """Parses DEGIRO transaction export rows."""
     if not os.path.exists(csv_path):
-        print("⚠️ DEGIRO statement missing in imports folder. Skipping parse...")
+        print("⚠️ [SyncStocks] DEGIRO statement missing in imports folder. Skipping parse...")
         return
     
     cursor = db_manager.conn.cursor()
@@ -117,12 +117,12 @@ def parse_degiro(db_manager, csv_path):
                 inserted += 1
                 
     db_manager.conn.commit()
-    print(f"📊 [DEGIRO Engine] Sync complete. Injected {inserted} new operations.")
+    print(f"📊 [SyncStocks] [DEGIRO Engine] Sync complete. Injected {inserted} new operations.")
 
 def parse_trade_republic(db_manager, csv_path):
     """Parses Trade Republic export tracking both cash flows and stock acquisitions."""
     if not os.path.exists(csv_path):
-        print("⚠️ Trade Republic statement missing in imports folder. Skipping parse...")
+        print("⚠️ [SyncStocks] Trade Republic statement missing in imports folder. Skipping parse...")
         return
         
     cursor = db_manager.conn.cursor()
@@ -152,7 +152,7 @@ def parse_trade_republic(db_manager, csv_path):
                 inserted += 1
                 
     db_manager.conn.commit()
-    print(f"📊 [Trade Republic Engine] Sync complete. Injected {inserted} new operations.")
+    print(f"📊 [SyncStocks] [Trade Republic Engine] Sync complete. Injected {inserted} new operations.")
 
 def calculate_stock_balances(db_manager):
     """Aggregates historical transactions and triggers metadata mapping."""
@@ -177,7 +177,7 @@ def calculate_stock_balances(db_manager):
 
 def sync_stocks():
     """Master orchestrator function."""
-    print("🛰️ Starting complete stock broker offline synchronization matrix...")
+    print("🛰️ [SyncStocks] Starting complete stock broker offline synchronization matrix...")
     base_dir = os.path.dirname(os.path.abspath(__file__))
     imports_dir = os.path.join(base_dir, "imports")
     db = DatabaseManager()
@@ -186,7 +186,7 @@ def sync_stocks():
     parse_trade_republic(db, os.path.join(imports_dir, "TRADEREPUBLIC_Transactions.csv"))
     
     stock_portfolio = calculate_stock_balances(db)
-    print("✨ ALL STOCK BROKER SYNC OPERATIONS EXECUTED CLEANLY\n")
+    print("✨ [SyncStocks] ALL STOCK BROKER SYNC OPERATIONS EXECUTED CLEANLY\n")
     return stock_portfolio
 
 if __name__ == "__main__":

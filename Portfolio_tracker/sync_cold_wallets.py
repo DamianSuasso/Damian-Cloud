@@ -11,11 +11,11 @@ def sync_bitcoin_history():
     raw_address = os.getenv('WALLET_BTC')
     
     if not raw_address or raw_address.strip() in ["", "None"]:
-        print("🛑 Error: WALLET_BTC environment variable is completely empty or missing.")
+        print("❌ [SyncColdWallets] Error: WALLET_BTC environment variable is completely empty or missing.")
         return 0.0
 
     btc_address = raw_address.strip()
-    print(f"🛰️ Target Address Confirmed: {btc_address}")
+    print(f"🛰️ [SyncColdWallets] Target Address Confirmed: {btc_address}")
     
     # 1. First fetch the account statistics to extract the true live balance snapshot
     balance_url = f"https://mempool.space/api/address/{btc_address}"
@@ -29,9 +29,9 @@ def sync_bitcoin_history():
             # Live Satoshis = Total Funded - Total Spent
             live_sats = chain_stats.get('funded_txo_sum', 0) - chain_stats.get('spent_txo_sum', 0)
             live_btc_balance = float(live_sats) / 100_000_000
-            print(f"💰 True On-Chain Controlled Balance: {live_btc_balance:.8f} BTC")
+            print(f"💰 [SyncColdWallets] True On-Chain Controlled Balance: {live_btc_balance:.8f} BTC")
     except Exception as e:
-        print(f"⚠️ Balance checkpoint error fetching live BTC status: {e}")
+        print(f"⚠️ [SyncColdWallets] Balance checkpoint error fetching live BTC status: {e}")
 
     # 2. Fetch transaction histories
     tx_url = f"https://mempool.space/api/address/{btc_address}/txs"
@@ -40,11 +40,11 @@ def sync_bitcoin_history():
         res = requests.get(tx_url, timeout=10)
         
         if res.status_code == 400:
-            print(f"❌ API Status 400: Bad Request. Check that this is a valid Mainnet BTC address string.")
-            print(f"Attempted URL target was: {tx_url}")
+            print(f"❌ [SyncColdWallets] API Status 400: Bad Request. Check that this is a valid Mainnet BTC address string.")
+            print(f"❌ [SyncColdWallets] Attempted URL target was: {tx_url}")
             return live_btc_balance
         elif res.status_code != 200:
-            print(f"❌ Failed to fetch BTC history. API status: {res.status_code}")
+            print(f"❌ [SyncColdWallets] Failed to fetch BTC history. API status: {res.status_code}")
             return live_btc_balance
             
         raw_txs = res.json()
@@ -120,13 +120,13 @@ def sync_bitcoin_history():
 def sync_ethereum_history():
     raw_address = os.getenv('WALLET_ETH')
     if not raw_address or raw_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_ETH found in your environment configuration. Skipping...")
+        print("❌ [SyncColdWallets] No WALLET_ETH found in your environment configuration. Skipping...")
         return 0.0
 
     # Normalize by converting to lowercase and completely stripping the '0x' prefix 
     # to guarantee clean matching with Blockcypher's address list strings.
     eth_address = raw_address.strip().lower().replace("0x", "")
-    print(f"🛰 *Querying Blockcypher for Ethereum address history: {eth_address[:10]}...")
+    print(f"🛰️ [SyncColdWallets] Querying Blockcypher for Ethereum address history: {eth_address[:10]}...")
     
     url = f"https://api.blockcypher.com/v1/eth/main/addrs/0x{eth_address}/full"
     live_eth_balance = 0.0
@@ -134,7 +134,7 @@ def sync_ethereum_history():
     try:
         res = requests.get(url, timeout=10)
         if res.status_code != 200:
-            print(f"❌ Failed to fetch ETH history. API status: {res.status_code}")
+            print(f"❌ [SyncColdWallets] Failed to fetch ETH history. API status: {res.status_code}")
             return live_eth_balance
             
         data = res.json()
@@ -142,7 +142,7 @@ def sync_ethereum_history():
         # Extract live verified account balance directly from Blockcypher (Value comes in Wei)
         live_wei = float(data.get('balance', 0))
         live_eth_balance = live_wei / 10**18
-        print(f"💰 True On-Chain Controlled Balance: {live_eth_balance:.6f} ETH")
+        print(f"💰 [SyncColdWallets] True On-Chain Controlled Balance: {live_eth_balance:.6f} ETH")
 
         raw_txs = data.get('txs', [])
         parsed_entries = []
@@ -206,12 +206,12 @@ def sync_ethereum_history():
         if parsed_entries:
             db = DatabaseManager()
             db.save_cold_wallet_transactions(parsed_entries)
-            print(f"💾 Successfully processed and saved {len(parsed_entries)} ETH on-chain events via Blockcypher.")
+            print(f"💾 [SyncColdWallets] Successfully processed and saved {len(parsed_entries)} ETH on-chain events via Blockcypher.")
         else:
-            print("✅ No matching ledger movements extracted for ETH address.")
+            print("✅ [SyncColdWallets] No matching ledger movements extracted for ETH address.")
 
     except Exception as e:
-        print(f"❌ Ethereum On-Chain Sync Error: {e}")
+        print(f"❌ [SyncColdWallets] Ethereum On-Chain Sync Error: {e}")
 
     # Return the live on-chain check value for main.py UI and audit loops
     return live_eth_balance
@@ -219,11 +219,11 @@ def sync_ethereum_history():
 def sync_xrp_history():
     xrp_address = os.getenv('WALLET_XRP')
     if not xrp_address or xrp_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_XRP found in your environment configuration. Skipping...")
+        print("❌ [SyncColdWallets] No WALLET_XRP found in your environment configuration. Skipping...")
         return 0.0
 
     xrp_address = xrp_address.strip()
-    print(f"🛰️ Querying XRPL Cluster Node for XRP history: {xrp_address[:10]}...")
+    print(f"🛰️ [SyncColdWallets] Querying XRPL Cluster Node for XRP history: {xrp_address[:10]}...")
     
     url = "https://xrplcluster.com/"
     live_xrp_balance = 0.0
@@ -248,9 +248,9 @@ def sync_xrp_history():
             raw_balance = account_data.get('Balance')
             if raw_balance is not None:
                 live_xrp_balance = float(raw_balance) / 1_000_000
-                print(f"💰 True On-Chain Controlled Balance: {live_xrp_balance:.6f} XRP")
+                print(f"💰 [SyncColdWallets] True On-Chain Controlled Balance: {live_xrp_balance:.6f} XRP")
     except Exception as e:
-        print(f"⚠️ Balance checkpoint error fetching live XRP status: {e}")
+        print(f"⚠️ [SyncColdWallets] Balance checkpoint error fetching live XRP status: {e}")
 
     # 2. Fetch transaction histories
     tx_payload = {
@@ -268,7 +268,7 @@ def sync_xrp_history():
     try:
         res = requests.post(url, json=tx_payload, timeout=10)
         if res.status_code != 200:
-            print(f"❌ Failed to fetch XRP history. API status: {res.status_code}")
+            print(f"❌ [SyncColdWallets] Failed to fetch XRP history. API status: {res.status_code}")
             return live_xrp_balance
             
         data = res.json()
@@ -325,12 +325,12 @@ def sync_xrp_history():
         if parsed_entries:
             db = DatabaseManager()
             db.save_cold_wallet_transactions(parsed_entries)
-            print(f"💾 Successfully processed and saved {len(parsed_entries)} XRP on-chain events via XRPL Node.")
+            print(f"💾 [SyncColdWallets] Successfully processed and saved {len(parsed_entries)} XRP on-chain events via XRPL Node.")
         else:
-            print("✅ No matching ledger movements extracted for XRP address.")
+            print("✅ [SyncColdWallets] No matching ledger movements extracted for XRP address.")
 
     except Exception as e:
-        print(f"❌ XRP On-Chain Sync Error: {e}")
+        print(f"❌ [SyncColdWallets] XRP On-Chain Sync Error: {e}")
 
     # Return the live balance back out to the matrix orchestrator
     return live_xrp_balance
@@ -341,16 +341,16 @@ def sync_bsc_history_BSCCHAINAPI_REQUIRED():
     
     # Validation checks point to the unified key asset variable now
     if not raw_address or raw_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_ETH address found in environment variables. Skipping...")
+        print("❌ [SyncColdWallets] No WALLET_ETH address found in environment variables. Skipping...")
         return
     if not etherscan_key or etherscan_key.strip() in ["", "None"]:
-        print("🛑 No ETHERSCAN_API_KEY found in your environment. Skipping BSC sync...")
+        print("❌ [SyncColdWallets] No ETHERSCAN_API_KEY found in your environment. Skipping BSC sync...")
         return
 
     bsc_address = raw_address.strip().lower()
     clean_key = etherscan_key.strip().replace('"', '').replace("'", "")
     
-    print(f"🛰️ Querying Unified Etherscan API V2 for BSC (Chain 56) asset history...")
+    print(f"🛰️ [SyncColdWallets] Querying Unified Etherscan API V2 for BSC (Chain 56) asset history...")
 
     parsed_entries = {}
     
@@ -394,11 +394,11 @@ def sync_bsc_history_BSCCHAINAPI_REQUIRED():
                         'block_height': int(tx.get("blockNumber", 0))
                     }
             elif "No transactions found" in message or status == "0":
-                print("ℹ️ Etherscan V2 Info: No native BNB movements found.")
+                print("ℹ️ [SyncColdWallets] Etherscan V2 Info: No native BNB movements found.")
             else:
-                print(f"⚠️ Etherscan V2 Warning (BNB): {message}")
+                print(f"⚠️ [SyncColdWallets] Etherscan V2 Warning (BNB): {message}")
     except Exception as e:
-        print(f"⚠️ Error fetching native BNB layout via V2: {e}")
+        print(f"⚠️ [SyncColdWallets] Error fetching native BNB layout via V2: {e}")
 
     # ==============================================================================
     # 2. FETCH BEP-20 TOKEN TRANSACTIONS (USDT, CAKE, LINK, etc.)
@@ -436,11 +436,11 @@ def sync_bsc_history_BSCCHAINAPI_REQUIRED():
                         'block_height': int(tx.get("blockNumber", 0))
                     }
             elif "No transactions found" in message or status == "0":
-                print("ℹ️ Etherscan V2 Info: No BEP-20 token movements found.")
+                print("ℹ️ [SyncColdWallets] Etherscan V2 Info: No BEP-20 token movements found.")
             else:
-                print(f"⚠️ Etherscan V2 Warning (Token): {message}")
+                print(f"⚠️ [SyncColdWallets] Etherscan V2 Warning (Token): {message}")
     except Exception as e:
-        print(f"⚠️ Error fetching BEP-20 token layout via V2: {e}")
+        print(f"⚠️ [SyncColdWallets] Error fetching BEP-20 token layout via V2: {e}")
 
     # ==============================================================================
     # 3. SAVE MERGED LOG ENTRIES TO THE DATABASE
@@ -449,23 +449,23 @@ def sync_bsc_history_BSCCHAINAPI_REQUIRED():
     if final_list:
         db = DatabaseManager()
         db.save_cold_wallet_transactions(final_list)
-        print(f"💾 Successfully cached {len(final_list)} BSC ecosystem events via Etherscan V2.")
+        print(f"💾 [SyncColdWallets] Successfully cached {len(final_list)} BSC ecosystem events via Etherscan V2.")
     else:
-        print("✅ No valid ledger movements found across BNB or BEP-20 lists.")
+        print("✅ [SyncColdWallets] No valid ledger movements found across BNB or BEP-20 lists.")
 
 def sync_bsc_history():
     raw_address = os.getenv('WALLET_ETH')
     ankr_url = os.getenv('ANKR_BSC_URL')
     
     if not raw_address or raw_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_ETH address found in environment variables. Skipping...")
+        print("🛑 [SyncColdWallets] No WALLET_ETH address found in environment variables. Skipping...")
         return {}
     if not ankr_url or ankr_url.strip() in ["", "None"]:
-        print("🛑 No ANKR_BSC_URL found in your environment. Skipping BSC sync...")
+        print("❌ [SyncColdWallets] No ANKR_BSC_URL found in your environment. Skipping BSC sync...")
         return {}
 
     bsc_address = raw_address.strip().lower()
-    print(f"🛰️ Directly querying Ankr Indexer by wallet address for complete BSC history...")
+    print(f"🛰️ [SyncColdWallets] Directly querying Ankr Indexer by wallet address for complete BSC history...")
     
     headers = {"Content-Type": "application/json"}
     live_bsc_balances = {}
@@ -493,9 +493,9 @@ def sync_bsc_history():
             
             # Print a neat summary of what was found on-chain
             balance_str = ", ".join([f"{v:.4f} {k}" for k, v in live_bsc_balances.items()])
-            print(f"💰 True On-Chain Controlled Balances: {balance_str if balance_str else '0.00 BNB'}")
+            print(f"💰 [SyncColdWallets] True On-Chain Controlled Balances: {balance_str if balance_str else '0.00 BNB'}")
     except Exception as e:
-        print(f"⚠️ Balance checkpoint error fetching live BSC assets: {e}")
+        print(f"⚠️ [SyncColdWallets] Balance checkpoint error fetching live BSC assets: {e}")
 
     # Fallback to ensure BNB key exists even if balance is absolute zero
     if "BNB" not in live_bsc_balances:
@@ -518,7 +518,7 @@ def sync_bsc_history():
         data = res.json()
         
         if "error" in data:
-            print(f"❌ Ankr Server Error: {data['error'].get('message')} (Code: {data['error'].get('code')})")
+            print(f"❌ [SyncColdWallets] Ankr Server Error: {data['error'].get('message')} (Code: {data['error'].get('code')})")
             return live_bsc_balances
             
         tx_wrapper = data.get('result', {})
@@ -631,25 +631,25 @@ def sync_bsc_history():
 
             db = DatabaseManager()
             db.save_cold_wallet_transactions(list(unique_map.values()))
-            print(f"💾 Successfully indexed {len(unique_map)} clean base-10 BSC ledger events.")
+            print(f"💾 [SyncColdWallets] Successfully indexed {len(unique_map)} clean base-10 BSC ledger events.")
         else:
-            print("✅ BSC evaluation clear: No matching asset actions found.")
+            print("✅ [SyncColdWallets] BSC evaluation clear: No matching asset actions found.")
 
     except Exception as e:
-        print(f"❌ Ankr Hex Processing Engine Error: {e}")
+        print(f"❌ [SyncColdWallets] Ankr Hex Processing Engine Error: {e}")
 
     # Return the dictionary of all live on-chain token assets
     return live_bsc_balances
 
-def sync_ada_history_OLD():
+# def sync_ada_history_OLD():
     raw_stake_address = os.getenv('WALLET_ADA')
     blockfrost_key = os.getenv('BLOCKFROST_API_KEY')
     
     if not raw_stake_address or raw_stake_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_ADA stake key found in environment variables. Skipping...")
+        print("🛑 [SyncColdWallets] No WALLET_ADA stake key found in environment variables. Skipping...")
         return
     if not blockfrost_key or blockfrost_key.strip() in ["", "None"]:
-        print("🛑 No BLOCKFROST_API_KEY found in your environment. Skipping ADA sync...")
+        print("🛑 [SyncColdWallets] No BLOCKFROST_API_KEY found in your environment. Skipping ADA sync...")
         return
 
     stake_address = raw_stake_address.strip()
@@ -657,10 +657,10 @@ def sync_ada_history_OLD():
     
     # Validation: Ensure the user provided a stake key rather than a regular address
     if not stake_address.startswith("stake"):
-        print("⚠️ Warning: WALLET_ADA should be your 'stake1...' key to track multiple addresses.")
+        print("⚠️ [SyncColdWallets] Warning: WALLET_ADA should be your 'stake1...' key to track multiple addresses.")
         return
 
-    print(f"🛰️ Querying Blockfrost Indexer for all active addresses linked to Stake Key...")
+    print(f"🛰️ [SyncColdWallets] Querying Blockfrost Indexer for all active addresses linked to Stake Key...")
     
     # Step 1: Discover all distinct addresses belonging to this wallet account footprint
     discovery_url = f"https://cardano-mainnet.blockfrost.io/api/v0/accounts/{stake_address}/addresses"
@@ -668,14 +668,14 @@ def sync_ada_history_OLD():
     try:
         discovery_res = requests.get(discovery_url, headers=headers, timeout=10)
         if discovery_res.status_code == 404:
-            print("ℹ️ Blockfrost Info: No active addresses mapped to this stake profile.")
+            print("ℹ️ [SyncColdWallets] Blockfrost Info: No active addresses mapped to this stake profile.")
             return
         elif discovery_res.status_code != 200:
-            print(f"❌ Failed account address map discovery. Status: {discovery_res.status_code}")
+            print(f"❌ [SyncColdWallets] Failed account address map discovery. Status: {discovery_res.status_code}")
             return
             
         discovered_addresses = [item.get("address") for item in discovery_res.json() if item.get("address")]
-        print(f"🎯 Discovered {len(discovered_addresses)} active sub-address paths for this wallet.")
+        print(f"🎯 [SyncColdWallets] Discovered {len(discovered_addresses)} active sub-address paths for this wallet.")
         
         parsed_entries = []
 
@@ -739,32 +739,32 @@ def sync_ada_history_OLD():
             
             db = DatabaseManager()
             db.save_cold_wallet_transactions(list(unique_entries))
-            print(f"💾 Success: Cached {len(unique_entries)} consolidated ADA account history events.")
+            print(f"💾 [SyncColdWallets] Success: Cached {len(unique_entries)} consolidated ADA account history events.")
         else:
-            print("✅ Account scan complete: No active multi-address asset movements found.")
+            print("✅ [SyncColdWallets] Account scan complete: No active multi-address asset movements found.")
 
     except Exception as e:
-        print(f"❌ Cardano Multi-Address Tracking Fault: {e}")
+        print(f"❌ [SyncColdWallets] Cardano Multi-Address Tracking Fault: {e}")
 
 def sync_ada_history():
     raw_stake_address = os.getenv('WALLET_ADA')
     blockfrost_key = os.getenv('BLOCKFROST_API_KEY')
     
     if not raw_stake_address or raw_stake_address.strip() in ["", "None"]:
-        print("🛑 No WALLET_ADA stake key found in environment variables. Skipping...")
+        print("❌ [SyncColdWallets] No WALLET_ADA stake key found in environment variables. Skipping...")
         return 0.0
     if not blockfrost_key or blockfrost_key.strip() in ["", "None"]:
-        print("🛑 No BLOCKFROST_API_KEY found in your environment. Skipping ADA sync...")
+        print("❌ [SyncColdWallets] No BLOCKFROST_API_KEY found in your environment. Skipping ADA sync...")
         return 0.0
 
     stake_address = raw_stake_address.strip()
     headers = {"project_id": blockfrost_key.strip()}
     
     if not stake_address.startswith("stake"):
-        print("⚠️ Warning: WALLET_ADA must be your 'stake1...' key to reconcile multi-address balances.")
+        print("⚠️ [SyncColdWallets] Warning: WALLET_ADA must be your 'stake1...' key to reconcile multi-address balances.")
         return 0.0
 
-    print(f"🛰️ Auditing true account balance metrics via Blockfrost...")
+    print(f"🛰️ [SyncColdWallets] Auditing true account balance metrics via Blockfrost...")
     account_url = f"https://cardano-mainnet.blockfrost.io/api/v0/accounts/{stake_address}"
     controlled_amount = 0.0
     
@@ -774,10 +774,10 @@ def sync_ada_history():
             acc_data = acc_res.json()
             controlled_amount = float(acc_data.get('controlled_amount', 0)) / 10**6
             withdrawable_rewards = float(acc_data.get("withdrawable_amount", 0)) / 10**6
-            print(f"💰 True Live Controlled Balance: {controlled_amount:.6f} ADA")
-            print(f"🎁 Hidden Unwithdrawn Staking Rewards: {withdrawable_rewards:.6f} ADA")
+            print(f"💰 [SyncColdWallets] True Live Controlled Balance: {controlled_amount:.6f} ADA")
+            print(f"🎁 [SyncColdWallets] Hidden Unwithdrawn Staking Rewards: {withdrawable_rewards:.6f} ADA")
     except Exception as e:
-        print(f"⚠️ Live profile audit warning: {e}")
+        print(f"⚠️ [SyncColdWallets] Live profile audit warning: {e}")
 
     # ==============================================================================
     # STEP 1: MAP THE WALLET FOOTPRINT
@@ -786,11 +786,11 @@ def sync_ada_history():
     try:
         discovery_res = requests.get(discovery_url, headers=headers, timeout=10)
         if discovery_res.status_code != 200:
-            print("❌ Failed to map account footprint addresses.")
+            print("❌ [SyncColdWallets] Failed to map account footprint addresses.")
             return controlled_amount
             
         my_wallet_addresses = {item.get("address") for item in discovery_res.json() if item.get("address")}
-        print(f"🎯 Discovered {len(my_wallet_addresses)} active sub-address paths for this wallet.")
+        print(f"🎯 [SyncColdWallets] Discovered {len(my_wallet_addresses)} active sub-address paths for this wallet.")
         
         all_tx_hashes = set()
         for idx, addr in enumerate(my_wallet_addresses, 1):
@@ -802,7 +802,7 @@ def sync_ada_history():
                 for tx in res.json():
                     all_tx_hashes.add(tx.get("tx_hash"))
 
-        print(f"📡 Evaluating {len(all_tx_hashes)} unique transaction contexts across the eUTXO space...")
+        print(f"📡 [SyncColdWallets] Evaluating {len(all_tx_hashes)} unique transaction contexts across the eUTXO space...")
         parsed_entries = []
 
         # ==============================================================================
@@ -868,19 +868,19 @@ def sync_ada_history():
         if parsed_entries:
             db = DatabaseManager()
             db.save_cold_wallet_transactions(parsed_entries)
-            print(f"💾 Success: Saved {len(parsed_entries)} audited ADA records with precise block and fee tallies.")
+            print(f"💾 [SyncColdWallets] Success: Saved {len(parsed_entries)} audited ADA records with precise block and fee tallies.")
         else:
-            print("✅ Account analysis complete: All movements match expected baseline targets.")
+            print("✅ [SyncColdWallets] Account analysis complete: All movements match expected baseline targets.")
 
     except Exception as e:
-        print(f"❌ Cardano Global Accounting Engine Fault: {e}")
+        print(f"❌ [SyncColdWallets] Cardano Global Accounting Engine Fault: {e}")
 
     # Definitive return vector for the view layer layout matrix
     return controlled_amount
 
 def sync_all_wallets():
     """Master orchestrator function to sequentially sync all on-chain cold wallets."""
-    print("🛰️ Starting complete cold wallet on-chain synchronization matrix...")
+    print("🛰️ [SyncColdWallets] Starting complete cold wallet on-chain synchronization matrix...")
     balances = {}
 
     # --- 1. Execute BSC Sync & Audit ---
@@ -893,12 +893,12 @@ def sync_all_wallets():
             
             # Audit checking each active token balance
             db_calculated = db.get_calculated_balance_for_coin(coin)
-            print(f"🔍 [{coin} Audit] On-Chain: {live_val:.4f} | Local DB Tally: {db_calculated:.4f}")
+            print(f"🔍 [SyncColdWallets] [{coin} Audit] On-Chain: {live_val:.4f} | Local DB Tally: {db_calculated:.4f}")
             
             if abs(live_val - db_calculated) > 0.01:
-                print(f"⚠️ Fact-Check Alert: Local {coin} ledger delta detected! On-chain reality takes priority.")
+                print(f"⚠️ [SyncColdWallets] Fact-Check Alert: Local {coin} ledger delta detected! On-chain reality takes priority.")
     except Exception as e:
-        print(f"❌ BSC Engine Sync/Audit Failure: {e}")
+        print(f"❌ [SyncColdWallets] BSC Engine Sync/Audit Failure: {e}")
         balances["BNB"] = "Sync Error"
         
     # --- 2. Execute Cardano Sync & Audit ---
@@ -911,9 +911,9 @@ def sync_all_wallets():
         
         print(f"🔍 [ADA Audit] On-Chain: {live_ada:.4f} | Local DB Tally: {db_calculated_ada:.4f}")
         if abs(live_ada - db_calculated_ada) > 0.01:
-            print(f"⚠️ Fact-Check Alert: Local ADA ledger delta detected! On-chain reality takes priority.")
+            print(f"⚠️ [SyncColdWallets] Fact-Check Alert: Local ADA ledger delta detected! On-chain reality takes priority.")
     except Exception as e:
-        print(f"❌ ADA Engine Sync/Audit Failure: {e}")
+        print(f"❌ [SyncColdWallets] ADA Engine Sync/Audit Failure: {e}")
         balances["ADA"] = "Sync Error"
 
     # --- 3. Execute Bitcoin Sync & Audit ---
@@ -924,11 +924,11 @@ def sync_all_wallets():
         db = DatabaseManager()
         db_calculated_btc = db.get_calculated_balance_for_coin("BTC")
         
-        print(f"🔍 [BTC Audit] On-Chain: {live_btc:.8f} | Local DB Tally: {db_calculated_btc:.8f}")
+        print(f"🔍 [SyncColdWallets] [BTC Audit] On-Chain: {live_btc:.8f} | Local DB Tally: {db_calculated_btc:.8f}")
         if abs(live_btc - db_calculated_btc) > 0.00001:
-            print(f"⚠️ Fact-Check Alert: Local BTC ledger delta detected! On-chain reality takes priority.")
+            print(f"⚠️ [SyncColdWallets] Fact-Check Alert: Local BTC ledger delta detected! On-chain reality takes priority.")
     except Exception as e:
-        print(f"❌ Bitcoin Engine Sync/Audit Failure: {e}")
+        print(f"❌ [SyncColdWallets] Bitcoin Engine Sync/Audit Failure: {e}")
         balances["BTC"] = "Sync Error"
 
     # --- 4. Execute Ethereum Sync & Audit ---
@@ -939,11 +939,11 @@ def sync_all_wallets():
         db = DatabaseManager()
         db_calculated_eth = db.get_calculated_balance_for_coin("ETH")
         
-        print(f"🔍 [ETH Audit] On-Chain: {live_eth:.6f} | Local DB Tally: {db_calculated_eth:.6f}")
+        print(f"🔍 [SyncColdWallets] [ETH Audit] On-Chain: {live_eth:.6f} | Local DB Tally: {db_calculated_eth:.6f}")
         if abs(live_eth - db_calculated_eth) > 0.0001:
-            print(f"⚠️ Fact-Check Alert: Local ETH ledger delta detected! On-chain reality takes priority.")
+            print(f"⚠️ [SyncColdWallets] Fact-Check Alert: Local ETH ledger delta detected! On-chain reality takes priority.")
     except Exception as e:
-        print(f"❌ Ethereum Engine Sync/Audit Failure: {e}")
+        print(f"❌ [SyncColdWallets] Ethereum Engine Sync/Audit Failure: {e}")
         balances["ETH"] = "Sync Error"
 
     # --- 5. Execute XRP Sync & Audit ---
@@ -954,14 +954,14 @@ def sync_all_wallets():
         db = DatabaseManager()
         db_calculated_xrp = db.get_calculated_balance_for_coin("XRP")
         
-        print(f"🔍 [XRP Audit] On-Chain: {live_xrp:.4f} | Local DB Tally: {db_calculated_xrp:.4f}")
+        print(f"🔍 [SyncColdWallets] [XRP Audit] On-Chain: {live_xrp:.4f} | Local DB Tally: {db_calculated_xrp:.4f}")
         if abs(live_xrp - db_calculated_xrp) > 0.01:
-            print(f"⚠️ Fact-Check Alert: Local XRP ledger delta detected! On-chain reality takes priority.")
+            print(f"⚠️ [SyncColdWallets] Fact-Check Alert: Local XRP ledger delta detected! On-chain reality takes priority.")
     except Exception as e:
-        print(f"❌ XRP Engine Sync/Audit Failure: {e}")
+        print(f"❌ [SyncColdWallets] XRP Engine Sync/Audit Failure: {e}")
         balances["XRP"] = "Sync Error"
 
-    print("✨ ALL SYNC OPERATIONS EXECUTED CLEANLY")
+    print("✨ [SyncColdWallets] ALL SYNC OPERATIONS EXECUTED CLEANLY")
 
     return balances
 
