@@ -61,109 +61,105 @@ MACRO_MAP = {
     "Portfolio / Trading (Excluded)": "Excluded"
 }
 
-def categorize_bank_row(description, amount):
-    desc = str(description).lower()
-    amt = float(amount)
-    
-    # 1. Housing & Rental Payments
-    if "mw s faszbender" in desc or "huishoit" in desc:
-        return "Housing & Utilities"
-
-    # 2. Internal Savings, Family Transfers & Tikkies
-    SAVINGS_ACCOUNTS = [
+KEYWORD_RULES = {
+    "Housing & Utilities": ["huishoit"],
+    "Internal Savings / Transfer": [
         "819694312", "116343354", "116343362", "126766568", 
         "126766614", "nl57trbk", "direct sparen", "noodpotje"
-    ]
-    
-    if any(k in desc for k in SAVINGS_ACCOUNTS):
-        return "Internal Savings / Transfer"
-
-    # Personal internal account transfers / Tikkies between payment accounts
-    PERSONAL_TRANSFERS = ["621816574", "430221096", "suasso lima prado", "tikkie", "betaalverzoek"]
-    if any(k in desc for k in PERSONAL_TRANSFERS):
-        return "Internal Transfer (Excluded)"
-
-    # 3a. Crypto Platforms
-    if any(k in desc for k in ["bitvavo", "coinbase", "binance", "kraken", "bybit", "crypto.com"]):
-        return "Crypto Investments"
-
-    # 3b. Traditional Brokerages & Stocks
-    if any(k in desc for k in ["trade republic", "degiro", "semmie", "meesman", "interactive brokers", "etoro"]):
-        return "Brokerage & Stocks" if amt < 0 else "Internal Savings / Transfer"
-        
-    # 4. Insurances, Healthcare, Banking & Taxes
-    if any(k in desc for k in [
+    ],
+    "Internal Transfer (Excluded)": ["621816574", "430221096", "suasso lima prado", "tikkie", "betaalverzoek"],
+    "Crypto Investments": ["bitvavo", "coinbase", "binance", "kraken", "bybit", "crypto.com"],
+    "Brokerage & Stocks": ["trade republic", "degiro", "semmie", "meesman", "interactive brokers", "etoro"],
+    "Insurances & Banking": [
         "abn amro schade", "basispakket", "verzeker", "ominimo", 
         "belastingdienst", "infomedics", "duo", "int card services", 
         "ics", "aevitae", "cz", "zilveren kruis"
-    ]):
-        return "Insurances & Banking"
-
-    # 5. Groceries & Supermarkets
-    if any(k in desc for k in [
+    ],
+    "Groceries": [
         "jumbo", "lidl", "butlon", "albert heijn", "supermarkt", 
-        "dirk", "aldi", "plus ", "intermarche", "k-kauppa"
-    ]):
-        return "Groceries"
-        
-    # 6. Transport, Fuel & Parking
-    if any(k in desc for k in [
+        "dirk", "aldi", "plus ", "intermarche", "k-kauppa", "spar", "coop", "groceries", 
+        "groenteboer", "markt", "versmarkt", "groentewinkel"
+    ],
+    "Transport & Fuel": [
         "benzine", "ns reizigers", "ns groep", "parking", "parkeren", 
-        "tango", "shell", "washin7", "essent", "tinq", "tamoil", "esso", "avia"
-    ]):
-        return "Transport & Fuel"
-        
-    # 7. Telecom, Hosting & Utilities
-    if any(k in desc for k in [
-        "simpel", "ziggo", "kpn", "odido", "vodafone", "t-mobile", 
-        "domain name", "host"
-    ]):
-        return "Telecom & Internet"
-        
-    # 8. Fitness & Subscriptions
-    if any(k in desc for k in [
-        "basic fit", "basic-fit", "hevy", "gym", "spotify", 
-        "netflix", "apple.com", "on that ass"
-    ]):
-        return "Fitness & Subscriptions"
-        
-    # 9. Dining, Fast Food & Restaurants
-    if any(k in desc for k in [
+        "tango", "shell", "washin7", "essent", "tinq", "tamoil", "esso", "avia",
+        "gabriels", "maes", "bp", "ns", "dats", "tankstation", "q8", "total", "texaco", "fastned", "evbox", "allego", "j.l. aers", "parkeergarage", 
+        "parkeer", "parkeerplaats", "parkeerkosten", "parkeerticket", "wasbox"
+    ],
+    "Telecom & Internet": [
+        "simpel", "ziggo", "kpn", "odido", "vodafone", "t-mobile", "domain name", "host", "telecom", 
+        "internet", "provider", "hosting", "website", "dns", "email service", "webhosting", "website hosting", "domain registration"
+    ],
+    "Fitness & Subscriptions": ["basic fit", "basic-fit", "hevy", "gym", "spotify", "netflix", "apple.com", "on that ass"],
+    "Dining & Snacks": [
         "smickel", "zinin ijs", "domino", "mcdonalds", "mcdonald's", "mcd ", 
-        "dadawan", "cafe", "restaurant", "bistro", "sushi", "cafetaria", "bedrijfsrest"
-    ]):
-        return "Dining & Snacks"
-        
-    # 10. Leisure, Events, Hobbies & Nightlife
-    if any(k in desc for k in [
+        "dadawan", "cafe", "restaurant", "bistro", "sushi", "cafetaria", "bedrijfsrest", "i love sushi", "de hemel", "dunkin", "kfc", "burger king", "starbucks", "subway", "pizzahut", 
+        "pizzaria", "pizzeria", "pizzeria", "pizzabakker", "broodjeszaak", "broodjesbar", "ijssalon"
+    ],
+    "Leisure & Personal": [
         "soenda", "peakz padel", "padel", "celebratix", "ticketmaster", 
         "ticketingpayments", "festivals", "bloemist", "vieren", "vier hoog", 
         "pairi daiza", "planet awesome", "social deal", "hotel", "horizon",
-        "ir.ottenbad", "ottenbad", "drift om te dansen", "drift", "subcultuur"
-    ]):
-        return "Leisure & Personal"
-        
-    # 11. Shopping & Retail
-    if any(k in desc for k in [
+        "ir.ottenbad", "ottenbad", "drift om te dansen", "drift", "subcultuur",
+        "de bootjes", "porto alta", "pittoresk", "theater", "bioscoop", "cinema", "cinemacity", "cinema city", 
+        "ski", "skivakantie", "skireis", "skitrip", "skiclub", "skischool", "skiën", "snowboarden", "wintersport", 
+        "wintersportvakantie", "pairidaiza", "pretpark", "attractiepark", "museum", "kunsthal", "concert", "muziekfestival", 
+        "theaterkaartjes", "kapperszaak", "dierenpark"
+    ],
+    "Shopping & Clothing": [
         "intertoys", "zalando", "bol.com", "amazon", "hm.com", 
-        "primark", "action", "decathlon"
-    ]):
-        return "Shopping & Clothing"
+        "primark", "action", "decathlon", "bijou brigitte", "hansanders", "c&a", "apple store", "webwinkel", "webshop", 
+        "online winkel", "only&sons", "hunkemoller", "wefashion", "sacha", "sneakers", "footlocker", "schoenen", "kleding", 
+        "fashion", "outlet", "Superdry", "vans", "adidas", "nike", "puma", "new balance", "reebok", "converse", "asics", "jogging", 
+        "sportkleding", "intersport", "amzn", "grottes", "cranenbroek", "kruidvat", "etos", "drogist", "drogisterij", "parfumerie", "cosmetica", "make-up", 
+        "beauty", "skincare", "trekplijster", "j&j", "the sting", "jack&jones", "only", "vila", "pieces", "vero moda", "selected femme", "selected homme", 
+        "mango", "zara", "bershka", "pull&bear", "hornbach", "gamma", "karwei", "praxis", "bouwmarkt", "tuincentrum", "ikea", "leen bakker", "blokker", "kwantum", "jysk"
+    ],
+    "Income & Yield": ["lisspanel", "creditrente", "salaris", "dividend"]
+}
+
+
+def match_central_keywords(text):
+    """Matches text against keywords prioritizing longer, specific keyword phrases first."""
+    text_lower = str(text).lower()
+    
+    # Flatten keywords into a list of tuples: (keyword_string, category_name)
+    all_keywords = []
+    for category, keywords in KEYWORD_RULES.items():
+        for kw in keywords:
+            all_keywords.append((kw, category))
+            
+    # Sort keywords by length descending so specific phrases like "apple store" match before shorter ones
+    all_keywords.sort(key=lambda x: len(x[0]), reverse=True)
+    
+    for kw, category in all_keywords:
+        if kw in text_lower:
+            return category
+            
+    return None
+
+def categorize_bank_row(description, amount):
+    amt = float(amount)
+    matched_cat = match_central_keywords(str(description))
+    
+    # 1. Handle positive amounts (Inflows, Refunds, Inbound Transfers)
+    if amt > 0:
+        if matched_cat == "Brokerage & Stocks":
+            return "Internal Savings / Transfer"
+        return "Income & Yield"
         
-    # 12. Income & Yield
-    if any(k in desc for k in ["lisspanel", "creditrente", "salaris", "dividend"]):
-        return "Income & Yield"
-    elif amt > 0:
-        return "Income & Yield"
+    # 2. Handle negative amounts (Outflows / Expenses)
+    if matched_cat:
+        return matched_cat
         
     return "Uncategorized"
 
 def categorize_tr_row(row):
     cat = str(row['category']).upper()
     tr_type = str(row['type']).upper()
-    name = str(row.get('name', '')).lower() if pd.notnull(row.get('name')) else ""
-    desc = str(row.get('description', '')).lower() if pd.notnull(row.get('description')) else ""
-    text = f"{name} {desc}"
+    name = str(row.get('name', '')) if pd.notnull(row.get('name')) else ""
+    desc = str(row.get('description', '')) if pd.notnull(row.get('description')) else ""
+    combined_text = f"{name} {desc}"
     
     # 1. Non-cash portfolio items
     if cat in ['TRADING', 'CORPORATE_ACTION', 'DELIVERY']:
@@ -177,20 +173,10 @@ def categorize_tr_row(row):
     elif tr_type in ['CUSTOMER_INBOUND', 'CUSTOMER_INPAYMENT', 'TRANSFER_INSTANT_INBOUND', 'VIBAN_TRANSFER_INBOUND', 'CUSTOMER_OUTBOUND_REQUEST', 'TRANSFER_INSTANT_OUTBOUND']:
         return "Internal Savings / Transfer"
         
-    # 4. Card Transactions
+    # 4. Card Transactions matching against shared keywords
     elif tr_type in ['CARD_TRANSACTION', 'CARD_TRANSACTION_INTERNATIONAL']:
-        if any(term in text for term in ["hotel", "ticketmaster", "social deal", "de bootjes", "porto alta", "pittoresk"]):
-            return "Leisure & Personal"
-        elif any(term in text for term in ["tinq", "esso", "tango", "shell"]):
-            return "Transport & Fuel"
-        elif any(term in text for term in ["i love sushi", "cafe", "restaurant"]):
-            return "Dining & Snacks"
-        elif any(term in text for term in ["intertoys", "apple store", "bijou brigitte", "hansanders"]):
-            return "Shopping & Clothing"
-        elif any(term in text for term in ["jumbo", "lidl", "albert heijn", "supermarkt"]):
-            return "Groceries"
-        else:
-            return "Leisure & Personal"
+        matched_cat = match_central_keywords(combined_text)
+        return matched_cat if matched_cat else "Uncategorized"
             
     return "Uncategorized"
 
@@ -809,19 +795,26 @@ with tab_ai:
     st.subheader("🤖 AI Budgeting Suggestions & Historical Benchmark")
     
     if not df_transactions.empty:
-        st.write("This tab analyzes your past spending trends to calculate realistic monthly budget targets for flexible categories.")
+        st.write("This tab analyzes your **Trailing 12 Months (TTM)** spending trends to calculate realistic, outlier-resistant budget targets.")
         
-        # Filter for actual spending (outflows, excluding internal transfers)
+        # 1. Filter out inflows and excluded internal transfers
         spend_data = df_transactions[
             (df_transactions['Amount'] < 0) & 
             (~df_transactions['Category'].isin(['Internal Savings / Transfer', 'Internal Transfer (Excluded)', 'Portfolio / Trading (Excluded)']))
         ].copy()
         spend_data['Abs_Amount'] = spend_data['Amount'].abs()
         
-        # Monthly spending per category
-        monthly_cat_spend = spend_data.groupby(['YearMonth', 'Category'])['Abs_Amount'].sum().reset_index()
+        # 2. Restrict analysis strictly to Trailing 12 Months (TTM) relative to latest data
+        latest_date = df_transactions['Date'].max()
+        cutoff_date = latest_date - pd.DateOffset(months=12)
+        ttm_spend_data = spend_data[spend_data['Date'] >= cutoff_date].copy()
         
-        # Select target categories for suggestions
+        monthly_cat_spend = ttm_spend_data.groupby(['YearMonth', 'Category'])['Abs_Amount'].sum().reset_index()
+        ttm_months_count = ttm_spend_data['YearMonth'].nunique()
+        
+        if ttm_months_count > 0:
+            st.caption(f"📅 Analyzing past **{ttm_months_count} months** of data (from {cutoff_date.strftime('%b %Y')} to {latest_date.strftime('%b %Y')}).")
+        
         default_target_cats = ["Groceries", "Transport & Fuel", "Dining & Snacks", "Shopping & Clothing", "Leisure & Personal"]
         selected_target_cats = st.multiselect(
             "Select categories to generate budget targets for:",
@@ -830,28 +823,27 @@ with tab_ai:
         )
         
         if selected_target_cats:
-            # Group by total months loaded in data to properly average even if a month had €0
-            total_months_count = df_transactions['YearMonth'].nunique()
-            
             stats_list = []
             for cat in selected_target_cats:
                 cat_df = monthly_cat_spend[monthly_cat_spend['Category'] == cat]
-                total_spent = cat_df['Abs_Amount'].sum()
-                avg_spent = total_spent / total_months_count if total_months_count > 0 else 0.0
+                
+                # Metrics across TTM
+                avg_spent = cat_df['Abs_Amount'].sum() / ttm_months_count if ttm_months_count > 0 else 0.0
+                median_spent = cat_df['Abs_Amount'].median() if not cat_df.empty else 0.0
                 max_spent = cat_df['Abs_Amount'].max() if not cat_df.empty else 0.0
                 min_spent = cat_df['Abs_Amount'].min() if not cat_df.empty else 0.0
                 std_spent = cat_df['Abs_Amount'].std() if len(cat_df) > 1 else 0.0
                 
-                # Rule-based AI Recommendation logic
-                # Low volatility -> Rec = Avg + 5%
-                # High volatility -> Rec = Median/Avg padded for buffer
-                recommended_budget = round(avg_spent * 1.05, -1) # Rounded to nearest 10
+                # Target based on Median + 5% buffer to mitigate high standard deviation/outliers
+                base_target = median_spent if median_spent > 0 else avg_spent
+                recommended_budget = round(base_target * 1.05, -1)
                 if recommended_budget == 0:
                     recommended_budget = 50.0
                 
                 stats_list.append({
                     "Category": cat,
-                    "Historical Monthly Avg": avg_spent,
+                    "TTM Monthly Avg": avg_spent,
+                    "TTM Median": median_spent,
                     "Min Month": min_spent,
                     "Max Month": max_spent,
                     "Volatility (StdDev)": std_spent,
@@ -860,12 +852,12 @@ with tab_ai:
             
             stats_df = pd.DataFrame(stats_list)
             
-            # --- DISPLAY SUMMARY BENCHMARKS ---
-            st.markdown("### **1. Category Spending Benchmarks**")
+            st.markdown("### **1. Category Spending Benchmarks (TTM)**")
             st.dataframe(
                 stats_df,
                 column_config={
-                    "Historical Monthly Avg": st.column_config.NumberColumn("Avg / Month", format="€ %.2f"),
+                    "TTM Monthly Avg": st.column_config.NumberColumn("TTM Avg / Mo", format="€ %.2f"),
+                    "TTM Median": st.column_config.NumberColumn("TTM Median / Mo", format="€ %.2f"),
                     "Min Month": st.column_config.NumberColumn("Min Month", format="€ %.2f"),
                     "Max Month": st.column_config.NumberColumn("Max Month", format="€ %.2f"),
                     "Volatility (StdDev)": st.column_config.NumberColumn("Std Dev", format="€ %.2f"),
@@ -877,49 +869,40 @@ with tab_ai:
             
             st.divider()
             
-            # --- AI ADVISOR INSIGHTS ---
             st.markdown("### **2. AI Advisor Recommendations & Insights**")
             
             for item in stats_list:
                 cat_name = item["Category"]
-                avg_val = item["Historical Monthly Avg"]
-                max_val = item["Max Month"]
+                avg_val = item["TTM Monthly Avg"]
+                med_val = item["TTM Median"]
                 rec_val = item["Suggested Monthly Budget"]
-                vol_val = item["Volatility (StdDev)"]
+                std_val = item["Volatility (StdDev)"]
                 
-                with st.expander(f"📌 **{cat_name}** — Suggested Budget: **€ {rec_val:,.2f}** / month", expanded=True):
+                with st.expander(f"📌 **{cat_name}** — Suggested Target: **€ {rec_val:,.2f}** / month", expanded=True):
                     col_a, col_b = st.columns([1, 2])
                     
                     with col_a:
-                        st.metric("Recommended Budget", f"€ {rec_val:,.2f}")
-                        st.metric("Historical Avg Spending", f"€ {avg_val:,.2f}")
+                        st.metric("Recommended Target", f"€ {rec_val:,.2f}")
+                        st.metric("TTM Median", f"€ {med_val:,.2f}")
+                        st.metric("TTM Mean Average", f"€ {avg_val:,.2f}")
                         
                     with col_b:
-                        if cat_name == "Groceries":
-                            st.info(
-                                f"**Analysis:** Your baseline spending for groceries averages **€{avg_val:,.2f}** per month. "
-                                f"Groceries are essential and predictable. Setting a target of **€{rec_val:,.2f}** allows a 5% safety buffer for inflation or bulk buys without overspending."
-                            )
-                        elif cat_name == "Transport & Fuel":
-                            st.info(
-                                f"**Analysis:** Fuel and transport costs average **€{avg_val:,.2f}** with a peak month of **€{max_val:,.2f}**. "
-                                f"Because fuel fluctuates with mileage and prices, a recommended cap of **€{rec_val:,.2f}** covers standard weekly driving."
-                            )
-                        elif cat_name == "Dining & Snacks":
+                        # Highlight high variance situations where Median beats Average
+                        if std_val > (avg_val * 0.4) and avg_val > 0:
                             st.warning(
-                                f"**Analysis:** Dining out averages **€{avg_val:,.2f}** monthly. "
-                                f"This is discretionary spending. A strict target of **€{rec_val:,.2f}** keeps dining enjoyable while preserving cash for savings."
+                                f"**High Volatility Detected:** Large spending fluctuations exist in this category (StdDev: €{std_val:,.2f}). "
+                                f"The target is grounded on your median spend (**€{med_val:,.2f}**) rather than the mean (**€{avg_val:,.2f}**) to prevent temporary spikes from skewing your baseline."
                             )
                         else:
-                            st.success(
-                                f"**Analysis:** Based on past data averaging **€{avg_val:,.2f}**, a monthly target of **€{rec_val:,.2f}** provides a well-balanced allocation based on your real spending behavior."
+                            st.info(
+                                f"**Stable Spend:** Baseline spending is consistent (Median: **€{med_val:,.2f}**, Mean: **€{avg_val:,.2f}**). "
+                                f"A target of **€{rec_val:,.2f}** gives a steady, comfortable operational cap."
                             )
 
             st.divider()
             
-            # --- HISTORICAL MONTHLY TREND CHART ---
-            st.markdown("### **3. Historical Category Trends vs Suggested Targets**")
-            sel_chart_cat = st.selectbox("Select category to view monthly breakdown:", options=selected_target_cats)
+            st.markdown("### **3. Trailing 12 Months Spend vs Target**")
+            sel_chart_cat = st.selectbox("Select category to view TTM breakdown:", options=selected_target_cats)
             
             trend_df = monthly_cat_spend[monthly_cat_spend['Category'] == sel_chart_cat].sort_values(by='YearMonth')
             target_val = next((item['Suggested Monthly Budget'] for item in stats_list if item['Category'] == sel_chart_cat), 0)
@@ -934,7 +917,7 @@ with tab_ai:
             fig_trend.add_trace(go.Scatter(
                 x=trend_df['YearMonth'],
                 y=[target_val] * len(trend_df),
-                name='Suggested Budget Target',
+                name='Suggested Target (Median-Based)',
                 mode='lines',
                 line=dict(color='#E76F51', width=3, dash='dash')
             ))
